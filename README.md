@@ -1,0 +1,1 @@
+# Codigo_da_Riqueza.py
