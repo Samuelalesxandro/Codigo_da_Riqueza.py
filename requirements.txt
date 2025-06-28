@@ -6,7 +6,4 @@ scikit-learn
 streamlit
 wbdata
 openpyxl
-
-
-
- Adiciona bibliotecas necessárias
+Adiciona bibliotecas necessárias
