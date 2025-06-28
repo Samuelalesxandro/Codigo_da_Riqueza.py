@@ -276,32 +276,43 @@ st.subheader("📅 Projeções futuras de PIB per capita (até 2030)")
 
 if st.button("Gerar projeções futuras"):
     try:
-        anos_futuros = list(range(df_pred['Ano'].max() + 1, 2031))
-        df_futuro = df_pred.copy()
+        # Filtrar apenas o país selecionado
+        df_base = df_pred[df_pred['País'] == pais_selecionado].copy()
+        ultimo_ano = df_base['Ano'].max()
+        anos_futuros = list(range(ultimo_ano + 1, 2031))
+
+        # Inicializar lista para armazenar novas linhas
+        linhas_futuras = []
+
+        linha_atual = df_base[df_base['Ano'] == ultimo_ano].iloc[0].copy()
 
         for ano in anos_futuros:
-            ultima_linha = df_futuro[df_futuro['Ano'] == ano - 1].copy()
-            nova_linha = ultima_linha.copy()
+            nova_linha = linha_atual.copy()
             nova_linha['Ano'] = ano
 
-            # Atualiza os lags com os valores do ano anterior
-            for col in ultima_linha.columns:
+            # Atualizar variáveis defasadas com os valores da linha anterior
+            for col in df_base.columns:
                 if '_lag1' in col:
                     base_col = col.replace('_lag1', '')
-                    if base_col in ultima_linha.columns:
-                        nova_linha[col] = ultima_linha[base_col].values[0]
+                    if base_col in linha_atual:
+                        nova_linha[col] = linha_atual[base_col]
 
-            # Prever o PIB per capita do novo ano
-            X_novo = nova_linha[[col for col in df_pred.columns if '_lag1' in col]]
+            # Prever o novo PIB
+            X_novo = pd.DataFrame([nova_linha[[col for col in df_base.columns if '_lag1' in col]]])
             nova_linha['PIB_per_capita'] = model.predict(X_novo)[0]
             nova_linha['PIB_previsto'] = nova_linha['PIB_per_capita']
 
-            df_futuro = pd.concat([df_futuro, nova_linha], ignore_index=True)
+            # Atualizar linha atual para próxima iteração
+            linha_atual = nova_linha.copy()
+            linhas_futuras.append(nova_linha)
 
-        # Plotar gráfico com anos futuros
+        # Concatenar tudo
+        df_futuro = pd.concat([df_base] + linhas_futuras, ignore_index=True)
+
+        # Plotar gráfico
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.plot(df_futuro['Ano'], df_futuro['PIB_per_capita'], label="Previsto", marker="o")
-        ax.axvline(df_pred['Ano'].max(), color='gray', linestyle='--', label="Ano atual")
+        ax.axvline(ultimo_ano, color='gray', linestyle='--', label="Ano atual")
         ax.set_title(f"Projeção de PIB per capita até 2030 — {pais_selecionado}")
         ax.set_ylabel("PIB per capita")
         ax.set_xlabel("Ano")
