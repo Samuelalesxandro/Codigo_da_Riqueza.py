@@ -272,3 +272,43 @@ if not df.empty:
 
 else:
     st.warning("Nenhum dado disponível para exibir.")
+st.subheader("📅 Projeções futuras de PIB per capita (até 2030)")
+
+if st.button("Gerar projeções futuras"):
+    try:
+        anos_futuros = list(range(df_pred['Ano'].max() + 1, 2031))
+        df_futuro = df_pred.copy()
+
+        for ano in anos_futuros:
+            ultima_linha = df_futuro[df_futuro['Ano'] == ano - 1].copy()
+            nova_linha = ultima_linha.copy()
+            nova_linha['Ano'] = ano
+
+            # Atualiza os lags com os valores do ano anterior
+            for col in ultima_linha.columns:
+                if '_lag1' in col:
+                    base_col = col.replace('_lag1', '')
+                    if base_col in ultima_linha.columns:
+                        nova_linha[col] = ultima_linha[base_col].values[0]
+
+            # Prever o PIB per capita do novo ano
+            X_novo = nova_linha[[col for col in df_pred.columns if '_lag1' in col]]
+            nova_linha['PIB_per_capita'] = model.predict(X_novo)[0]
+            nova_linha['PIB_previsto'] = nova_linha['PIB_per_capita']
+
+            df_futuro = pd.concat([df_futuro, nova_linha], ignore_index=True)
+
+        # Plotar gráfico com anos futuros
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(df_futuro['Ano'], df_futuro['PIB_per_capita'], label="Previsto", marker="o")
+        ax.axvline(df_pred['Ano'].max(), color='gray', linestyle='--', label="Ano atual")
+        ax.set_title(f"Projeção de PIB per capita até 2030 — {pais_selecionado}")
+        ax.set_ylabel("PIB per capita")
+        ax.set_xlabel("Ano")
+        ax.legend()
+        st.pyplot(fig)
+
+        st.dataframe(df_futuro[['Ano', 'PIB_per_capita']].round(2))
+
+    except Exception as e:
+        st.error(f"Erro ao gerar projeções futuras: {e}")
