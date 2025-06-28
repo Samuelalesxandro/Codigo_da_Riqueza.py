@@ -219,5 +219,56 @@ if not df.empty:
         file_name=f"{pais_selecionado}_dados_filtrados.csv",
         mime='text/csv'
     )
+
+    # --- PREVISÃO DE PIB PER CAPITA ---
+    st.subheader("🔮 Previsão de PIB per capita com XGBoost")
+
+    if st.button("Gerar previsão para o país selecionado"):
+        try:
+            df_pred = df_model.reset_index()
+            df_pred = df_pred[df_pred['País'] == pais_selecionado]
+            df_pred = df_pred.sort_values("Ano")
+
+            X_pred = df_pred[[col for col in df_pred.columns if '_lag1' in col]]
+            y_real = df_pred['PIB_per_capita']
+            y_pred = model.predict(X_pred)
+
+            df_pred['PIB_previsto'] = y_pred
+
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(df_pred['Ano'], y_real, label="Real", marker="o")
+            ax.plot(df_pred['Ano'], y_pred, label="Previsto", marker="o")
+            ax.set_title(f"PIB per capita — Real vs Previsto ({pais_selecionado})")
+            ax.set_ylabel("PIB per capita")
+            ax.set_xlabel("Ano")
+            ax.legend()
+            st.pyplot(fig)
+
+            st.dataframe(df_pred[['Ano', 'PIB_per_capita', 'PIB_previsto']].round(2))
+        except Exception as e:
+            st.error(f"Erro ao gerar previsão: {e}")
+
+    # --- COMPARAÇÃO ENTRE DOIS PAÍSES ---
+    st.subheader("📊 Comparar dois países lado a lado")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        pais_1 = st.selectbox("País 1", paises, index=0, key="pais1")
+    with col2:
+        pais_2 = st.selectbox("País 2", paises, index=1, key="pais2")
+
+    indicador_comp = st.selectbox("Indicador para comparar", indicadores, key="indicador_comp")
+
+    df_p1 = df[(df['País'] == pais_1) & (df['Ano'].between(ano_inicio, ano_fim))]
+    df_p2 = df[(df['País'] == pais_2) & (df['Ano'].between(ano_inicio, ano_fim))]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    sns.lineplot(data=df_p1, x="Ano", y=indicador_comp, label=pais_1, marker="o", ax=ax)
+    sns.lineplot(data=df_p2, x="Ano", y=indicador_comp, label=pais_2, marker="o", ax=ax)
+    ax.set_title(f"{indicador_comp.replace('_', ' ')} — {pais_1} vs {pais_2}")
+    ax.set_ylabel(indicador_comp.replace('_', ' '))
+    ax.set_xlabel("Ano")
+    st.pyplot(fig)
+
 else:
     st.warning("Nenhum dado disponível para exibir.")
