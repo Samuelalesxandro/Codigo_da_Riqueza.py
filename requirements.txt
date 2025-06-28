@@ -4,6 +4,4 @@ seaborn
 xgboost
 scikit-learn
 streamlit
-wbdata
 openpyxl
-Adiciona bibliotecas necessárias
