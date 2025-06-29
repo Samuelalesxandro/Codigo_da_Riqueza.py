@@ -284,30 +284,38 @@ if st.button("Gerar projeções futuras"):
         # Inicializar lista para armazenar novas linhas
         linhas_futuras = []
 
+        # Obter a última linha dos dados reais
         linha_atual = df_base[df_base['Ano'] == ultimo_ano].iloc[0].copy()
 
         for ano in anos_futuros:
             nova_linha = linha_atual.copy()
             nova_linha['Ano'] = ano
 
-            # Atualizar variáveis defasadas com os valores da linha anterior
+            # Atualizar as variáveis defasadas (_lag1) com valores da linha anterior
             for col in df_base.columns:
-                if '_lag1' in col:
+                if col.endswith('_lag1'):
                     base_col = col.replace('_lag1', '')
+                    # Usamos o valor previsto no ano anterior para a defasagem
                     if base_col in linha_atual:
                         nova_linha[col] = linha_atual[base_col]
 
-            # Prever o novo PIB
-            X_novo = pd.DataFrame([nova_linha[[col for col in df_base.columns if '_lag1' in col]]])
-            nova_linha['PIB_per_capita'] = model.predict(X_novo)[0]
-            nova_linha['PIB_previsto'] = nova_linha['PIB_per_capita']
+            # Preparar os dados para previsão
+            cols_modelo = [col for col in df_base.columns if col.endswith('_lag1')]
+            X_novo = pd.DataFrame([nova_linha[cols_modelo]])
 
-            # Atualizar linha atual para próxima iteração
+            # Prever o novo PIB per capita
+            pib_previsto = model.predict(X_novo)[0]
+
+            nova_linha['PIB_per_capita'] = pib_previsto
+            nova_linha['PIB_previsto'] = pib_previsto
+
+            # Atualizar a linha atual para o próximo ano
             linha_atual = nova_linha.copy()
+
             linhas_futuras.append(nova_linha)
 
-        # Concatenar tudo
-        df_futuro = pd.concat([df_base] + linhas_futuras, ignore_index=True)
+        # Converter a lista de Series para DataFrame
+        df_futuro = pd.concat([df_base, pd.DataFrame(linhas_futuras)], ignore_index=True)
 
         # Plotar gráfico
         fig, ax = plt.subplots(figsize=(10, 5))
