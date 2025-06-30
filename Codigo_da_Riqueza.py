@@ -279,44 +279,6 @@ else:
 
 
 # --- Função auxiliar para gerar projeções ---
-def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
-    df_pred = df_model.reset_index()
-    df_pred = df_pred[df_pred['País'] == pais].sort_values("Ano")
-    if df_pred.empty:
-        raise ValueError("Dados insuficientes para o país selecionado.")
-
-    df_base = df_pred.copy()
-    ultimo_ano = df_base['Ano'].max()
-    anos_futuros = list(range(ultimo_ano + 1, ano_final + 1))
-
-    linha_atual = df_base[df_base['Ano'] == ultimo_ano].iloc[0].copy()
-    linhas_futuras = []
-
-    for ano in anos_futuros:
-        nova_linha = linha_atual.copy()
-        nova_linha['Ano'] = ano
-
-        for col in df_base.columns:
-            if col.endswith('_lag1'):
-                base_col = col.replace('_lag1', '')
-                if base_col in linha_atual:
-                    nova_linha[col] = linha_atual[base_col]
-
-        cols_modelo = [col for col in df_base.columns if col.endswith('_lag1')]
-        X_novo = pd.DataFrame([nova_linha[cols_modelo]])
-        pib_previsto = modelo.predict(X_novo)[0]
-
-        nova_linha['PIB_per_capita'] = pib_previsto
-        nova_linha['PIB_previsto'] = pib_previsto
-        linha_atual = nova_linha.copy()
-        linhas_futuras.append(nova_linha)
-
-    df_futuro = pd.concat([df_base, pd.DataFrame(linhas_futuras)], ignore_index=True)
-    return df_futuro
-
-
-st.subheader("📅 Projeções futuras de PIB per capita (até 2030)")
-
 if st.button("Gerar projeções futuras"):
     try:
         def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
