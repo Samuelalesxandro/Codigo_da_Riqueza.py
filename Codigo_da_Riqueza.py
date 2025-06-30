@@ -32,11 +32,11 @@ INDICADORES = {
     "NE.CON.GOVT.CD": "Consumo_Governo",
     "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel"
 }
-
-ZONA_DO_EURO = ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', 'BEL']     
+ZONA_DO_EURO = ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', 'BEL']
+BRICS = ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE']      
 PAISES_SUL_AMERICA = ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'PRY', 'URY']
 PAISES_SUDESTE_ASIATICO = ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN']
-TODOS_PAISES = PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + ZONA_DO_EURO
+TODOS_PAISES = list(set(PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + BRICS + ZONA_DO_EURO))
 DATA_INICIO = datetime(1995, 1, 1)
 DATA_FIM = datetime(2025, 4, 30)
 
@@ -51,18 +51,19 @@ except Exception as e:
 
 # --- LIMPEZA E ORGANIZAÇÃO ---
 df = df_raw.reset_index()
-if 'country' not in df.columns and 'country' in df_raw.index.names:
-    df['País'] = df_raw.index.get_level_values('country').values
-elif 'country' in df.columns:
-    df.rename(columns={'country': 'País'}, inplace=True)
 
-if 'date' not in df.columns and 'date' in df_raw.index.names:
-    df['Ano'] = df_raw.index.get_level_values('date').values
-elif 'date' in df.columns:
+# Garante que as colunas 'País' e 'Ano' existam
+if 'country' in df.columns:
+    df.rename(columns={'country': 'País'}, inplace=True)
+if 'date' in df.columns:
     df.rename(columns={'date': 'Ano'}, inplace=True)
 
-df['Ano'] = pd.to_datetime(df['Ano']).dt.year
-df.rename(columns=INDICADORES, inplace=True)
+# Se ainda estiverem ausentes, tenta extrair do índice
+if 'País' not in df.columns and 'country' in df_raw.index.names:
+    df['País'] = df_raw.index.get_level_values('country')
+if 'Ano' not in df.columns and 'date' in df_raw.index.names:
+    df['Ano'] = df_raw.index.get_level_values('date')
+    print("Shape do df_raw:", df_raw.shape)
 
 print("✅ Colunas disponíveis:", df.columns.tolist())
 
@@ -79,6 +80,7 @@ print("\n📊 Amostra dos dados limpos:")
 print(df.head())
 
 # --- ENGENHARIA DE VARIÁVEIS ---
+print("Colunas disponíveis no df:", df.columns.tolist())
 df_model = df.copy().set_index(['País', 'Ano'])
 for var in df_model.columns:
     if var != 'PIB_per_capita':
