@@ -32,11 +32,11 @@ INDICADORES = {
     "NE.CON.GOVT.CD": "Consumo_Governo",
     "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel"
 }
-ZONA_DO_EURO = ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', 'BEL']
-BRICS = ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE']      
+
+ZONA_DO_EURO = ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', 'BEL']     
 PAISES_SUL_AMERICA = ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'PRY', 'URY']
 PAISES_SUDESTE_ASIATICO = ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN']
-TODOS_PAISES = list(set(PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + BRICS + ZONA_DO_EURO))
+TODOS_PAISES = PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + ZONA_DO_EURO
 DATA_INICIO = datetime(1995, 1, 1)
 DATA_FIM = datetime(2025, 4, 30)
 
