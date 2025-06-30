@@ -33,17 +33,53 @@ INDICADORES = {
     "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel"
 }
 
-PAISES_SUL_AMERICA = ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'PRY', 'URY']
-PAISES_SUDESTE_ASIATICO = ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN']
-TODOS_PAISES = PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO
-DATA_INICIO = datetime(1995, 1, 1)
-DATA_FIM = datetime(2025, 4, 30)
+      BLOCOS = {
+            "América do Sul": ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'PRY', 'URY'],
+            "Sudeste Asiático": ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN'],
+            "BRICS+": ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE'],
+            "Zona do Euro": ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', 'BEL']
+        }
+        
+        # Cria uma lista única de todos os países para uma única chamada de API
+        todos_paises_codigos = sorted(list(set(code for bloc in BLOCOS.values() for code in bloc)))
 
-# --- COLETA DOS DADOS ---
-try:
-    print("🔄 Coletando dados do Banco Mundial...")
-    df_raw = wbdata.get_dataframe(indicators=INDICADORES, country=TODOS_PAISES, date=(DATA_INICIO, DATA_FIM))
-    print("✅ Dados coletados com sucesso.")
+        DATA_INICIO = datetime(1995, 1, 1)
+        DATA_FIM = datetime(2022, 12, 31)
+
+        try:
+            df_raw = wbdata.get_dataframe(indicators=INDICADORES, country=todos_paises_codigos, date=(DATA_INICIO, DATA_FIM))
+            df_raw.rename(columns=INDICADORES, inplace=True)
+        except Exception as e:
+            st.error(f"❌ Erro ao baixar os dados do Banco Mundial: {e}")
+            return None, None
+
+        df = df_raw.reset_index()
+        df.rename(columns={'country': 'País', 'date': 'Ano'}, inplace=True)
+        df['Ano'] = pd.to_numeric(df['Ano'])
+        
+        # Adiciona uma coluna 'Bloco' ao dataframe
+        mapa_pais_bloco = {code: bloc for bloc, codes in BLOCOS.items() for code in codes}
+        # Primeiro, obtemos o mapa de código para nome
+        paises_info = {p['id']: p['name'] for p in wbdata.get_countries()}
+        df['Bloco'] = df['País'].map({name: mapa_pais_bloco.get(code) for code, name in paises_info.items()})
+
+        # Força todas as colunas de indicadores a serem numéricas
+        for col in INDICADORES.values():
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        df = df.sort_values(by=['País', 'Ano'])
+        df = df.groupby('País').ffill().bfill()
+        df.dropna(inplace=True)
+
+        df_model = df.copy().set_index(['País', 'Ano'])
+        for var in df_model.columns:
+            if var != 'PIB_per_capita' and var != 'Bloco':
+                df_model[f'{var}_lag1'] = df_model.groupby('País')[var].shift(1)
+        df_model.dropna(inplace=True)
+        
+        st.success("✅ Dados coletados e preparados com sucesso!")
+        return df, df_model.reset_index()
 except Exception as e:
     print(f"❌ Erro ao baixar os dados: {e}")
     exit()
