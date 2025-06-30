@@ -284,10 +284,13 @@ if st.button("Gerar projeções futuras"):
         def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
     df_pred = df_model.reset_index()
     df_pred = df_pred[df_pred['País'] == pais].sort_values("Ano")
-    
+
     if df_pred.empty:
         raise ValueError("Dados insuficientes para o país selecionado.")
-    
+
+    # Certifica que 'Ano' é int para evitar erros de concatenação
+    df_pred['Ano'] = df_pred['Ano'].astype(int)
+
     df_base = df_pred.copy()
     ultimo_ano = df_base['Ano'].max()
     anos_futuros = list(range(ultimo_ano + 1, ano_final + 1))
@@ -297,7 +300,7 @@ if st.button("Gerar projeções futuras"):
 
     for ano in anos_futuros:
         nova_linha = linha_atual.copy()
-        nova_linha['Ano'] = ano
+        nova_linha['Ano'] = ano  # aqui garantimos que é inteiro
 
         # Prepara input para o modelo com as variáveis _lag1
         cols_modelo = [col for col in df_base.columns if col.endswith('_lag1')]
@@ -311,11 +314,10 @@ if st.button("Gerar projeções futuras"):
         for col in cols_modelo:
             base_col = col.replace('_lag1', '')
             if base_col in nova_linha:
-                nova_linha[col] = nova_linha[base_col]  # Usar o valor mais recente
+                nova_linha[col] = nova_linha[base_col]  # Usa o valor mais recente
 
         linha_atual = nova_linha.copy()
         linhas_futuras.append(nova_linha)
 
-    df_futuro = pd.concat([df_base] + [pd.DataFrame(linhas_futuras)], ignore_index=True)
+    df_futuro = pd.concat([df_base, pd.DataFrame(linhas_futuras)], ignore_index=True)
     return df_futuro
-
