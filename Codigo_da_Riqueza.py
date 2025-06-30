@@ -44,7 +44,7 @@ INDICADORES = {
         todos_paises_codigos = sorted(list(set(code for bloc in BLOCOS.values() for code in bloc)))
 
         DATA_INICIO = datetime(1995, 1, 1)
-        DATA_FIM = datetime(2022, 12, 31)
+        DATA_FIM = datetime(2024, 12, 31)
 
         try:
             df_raw = wbdata.get_dataframe(indicators=INDICADORES, country=todos_paises_codigos, date=(DATA_INICIO, DATA_FIM))
