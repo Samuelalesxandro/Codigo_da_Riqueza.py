@@ -319,19 +319,41 @@ st.subheader("📅 Projeções futuras de PIB per capita (até 2030)")
 
 if st.button("Gerar projeções futuras"):
     try:
-        df_futuro = gerar_projecao_pib(df_model, pais_selecionado, model, ano_final=2030)
+        def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
+    df_pred = df_model.reset_index()
+    df_pred = df_pred[df_pred['País'] == pais].sort_values("Ano")
+    
+    if df_pred.empty:
+        raise ValueError("Dados insuficientes para o país selecionado.")
+    
+    df_base = df_pred.copy()
+    ultimo_ano = df_base['Ano'].max()
+    anos_futuros = list(range(ultimo_ano + 1, ano_final + 1))
 
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(df_futuro['Ano'], df_futuro['PIB_per_capita'], label="Previsto", marker="o")
-        ax.axvline(df_futuro['Ano'].max() - (2030 - df_futuro['Ano'].nunique() + 1), 
-                   color='gray', linestyle='--', label="Ano atual")
-        ax.set_title(f"Projeção de PIB per capita até 2030 — {pais_selecionado}")
-        ax.set_ylabel("PIB per capita")
-        ax.set_xlabel("Ano")
-        ax.legend()
-        st.pyplot(fig)
+    linha_atual = df_base[df_base['Ano'] == ultimo_ano].iloc[0].copy()
+    linhas_futuras = []
 
-        st.dataframe(df_futuro[['Ano', 'PIB_per_capita']].round(2))
+    for ano in anos_futuros:
+        nova_linha = linha_atual.copy()
+        nova_linha['Ano'] = ano
 
-    except Exception as e:
-        st.error(f"Erro ao gerar projeções futuras: {e}")
+        # Prepara input para o modelo com as variáveis _lag1
+        cols_modelo = [col for col in df_base.columns if col.endswith('_lag1')]
+        X_input = pd.DataFrame([linha_atual[cols_modelo]])
+
+        # Faz previsão
+        pib_previsto = modelo.predict(X_input)[0]
+        nova_linha['PIB_per_capita'] = pib_previsto
+
+        # Atualiza variáveis para o próximo ciclo (_lag1)
+        for col in cols_modelo:
+            base_col = col.replace('_lag1', '')
+            if base_col in nova_linha:
+                nova_linha[col] = nova_linha[base_col]  # Usar o valor mais recente
+
+        linha_atual = nova_linha.copy()
+        linhas_futuras.append(nova_linha)
+
+    df_futuro = pd.concat([df_base] + [pd.DataFrame(linhas_futuras)], ignore_index=True)
+    return df_futuro
+
