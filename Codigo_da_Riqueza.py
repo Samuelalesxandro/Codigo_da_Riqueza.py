@@ -275,13 +275,9 @@ if not df.empty:
 
 else:
     st.warning("Nenhum dado disponível para exibir.")
-
-
-
+    
 # --- Função auxiliar para gerar projeções ---
-if st.button("Gerar projeções futuras"):
-    try:
-       def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
+def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
     df_pred = df_model.reset_index()
     df_pred = df_pred[df_pred['País'] == pais].sort_values("Ano")
 
@@ -317,3 +313,13 @@ if st.button("Gerar projeções futuras"):
 
     df_futuro = pd.concat([df_base, pd.DataFrame(linhas_futuras)], ignore_index=True)
     return df_futuro
+
+# Botão que usa a função para gerar projeções
+if st.button("Gerar projeções futuras"):
+    try:
+        # Supondo que df_model, model, e pais_selecionado já estejam definidos
+        df_projecoes = gerar_projecao_pib(df_model, pais_selecionado, model)
+        st.dataframe(df_projecoes)
+        # aqui você pode adicionar gráficos, download, etc.
+    except Exception as e:
+        st.error(f"Erro ao gerar projeções futuras: {e}")
