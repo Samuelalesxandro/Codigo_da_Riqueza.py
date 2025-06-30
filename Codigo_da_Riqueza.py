@@ -33,7 +33,8 @@ INDICADORES = {
     "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel"
 }
 
-      BLOCOS = {
+      
+        BLOCOS = {
             "América do Sul": ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'PRY', 'URY'],
             "Sudeste Asiático": ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN'],
             "BRICS+": ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE'],
@@ -44,7 +45,7 @@ INDICADORES = {
         todos_paises_codigos = sorted(list(set(code for bloc in BLOCOS.values() for code in bloc)))
 
         DATA_INICIO = datetime(1995, 1, 1)
-        DATA_FIM = datetime(2024, 12, 31)
+        DATA_FIM = datetime(2022, 12, 31)
 
         try:
             df_raw = wbdata.get_dataframe(indicators=INDICADORES, country=todos_paises_codigos, date=(DATA_INICIO, DATA_FIM))
@@ -79,6 +80,24 @@ INDICADORES = {
         df_model.dropna(inplace=True)
         
         st.success("✅ Dados coletados e preparados com sucesso!")
+        return df, df_model.reset_index()
+
+@st.cache_data
+def treinar_modelo_global(_df_model):
+    st.info("🤖 Treinando modelo preditivo global...")
+    
+    TARGET = 'PIB_per_capita'
+    PREDICTORS = [col for col in _df_model.columns if '_lag1' in col]
+    X = _df_model[PREDICTORS]
+    y = _df_model[TARGET]
+    
+    best_model = XGBRegressor(random_state=42)
+    best_model.fit(X, y)
+    
+    importance = pd.Series(best_model.feature_importances_, index=PREDICTORS).sort_values(ascending=False)
+    
+    st.success("✅ Modelo global treinado!")
+    return importance
         return df, df_model.reset_index()
 except Exception as e:
     print(f"❌ Erro ao baixar os dados: {e}")
