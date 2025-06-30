@@ -281,14 +281,13 @@ else:
 # --- Função auxiliar para gerar projeções ---
 if st.button("Gerar projeções futuras"):
     try:
-        def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
+       def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
     df_pred = df_model.reset_index()
     df_pred = df_pred[df_pred['País'] == pais].sort_values("Ano")
 
     if df_pred.empty:
         raise ValueError("Dados insuficientes para o país selecionado.")
 
-    # Certifica que 'Ano' é int para evitar erros de concatenação
     df_pred['Ano'] = df_pred['Ano'].astype(int)
 
     df_base = df_pred.copy()
@@ -300,21 +299,18 @@ if st.button("Gerar projeções futuras"):
 
     for ano in anos_futuros:
         nova_linha = linha_atual.copy()
-        nova_linha['Ano'] = ano  # aqui garantimos que é inteiro
+        nova_linha['Ano'] = ano
 
-        # Prepara input para o modelo com as variáveis _lag1
         cols_modelo = [col for col in df_base.columns if col.endswith('_lag1')]
         X_input = pd.DataFrame([linha_atual[cols_modelo]])
 
-        # Faz previsão
         pib_previsto = modelo.predict(X_input)[0]
         nova_linha['PIB_per_capita'] = pib_previsto
 
-        # Atualiza variáveis para o próximo ciclo (_lag1)
         for col in cols_modelo:
             base_col = col.replace('_lag1', '')
             if base_col in nova_linha:
-                nova_linha[col] = nova_linha[base_col]  # Usa o valor mais recente
+                nova_linha[col] = nova_linha[base_col]
 
         linha_atual = nova_linha.copy()
         linhas_futuras.append(nova_linha)
