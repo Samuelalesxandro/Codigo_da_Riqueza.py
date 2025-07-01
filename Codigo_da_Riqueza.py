@@ -338,3 +338,46 @@ if st.button("Gerar projeções futuras"):
         st.dataframe(df_plot)
     except Exception as e:
         st.error(f"Erro ao gerar projeções futuras: {e}")
+
+aba = st.sidebar.radio("📌 Escolha a aba de análise", [
+    "Evolução dos Indicadores",
+    "Previsão de PIB per capita",
+    "Comparar Países",
+    "Análise Logarítmica"  # <-- Adiciona a nova aba aqui
+])
+
+# Suas outras abas acima...
+# ...
+
+# 🔍 NOVA ABA LOGARÍTMICA
+if aba == "Análise Logarítmica":
+    st.header("🔍 Análise Logarítmica de Indicadores")
+
+    df_log = df.copy()
+
+    st.write("Os dados abaixo passarão por transformação logarítmica (log natural).")
+
+    colunas_numericas = df_log.select_dtypes(include=np.number).columns.tolist()
+    colunas_para_log = st.multiselect(
+        "Selecione os indicadores para aplicar log:",
+        options=colunas_numericas,
+        default=[col for col in colunas_numericas if col != 'Ano']
+    )
+
+    for col in colunas_para_log:
+        df_log[f'log_{col}'] = df_log[col].apply(lambda x: np.log(x) if x > 0 else np.nan)
+
+    pais_log = st.selectbox("Escolha um país para visualizar", df_log['País'].unique(), key="pais_log")
+    df_filtrado_log = df_log[df_log['País'] == pais_log]
+
+    indicador_log = st.selectbox("Escolha um indicador log-transformado", [f'log_{col}' for col in colunas_para_log])
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    sns.lineplot(data=df_filtrado_log, x="Ano", y=indicador_log, marker="o", ax=ax)
+    ax.set_title(f"{indicador_log} ao longo do tempo — {pais_log}")
+    ax.set_ylabel(indicador_log)
+    ax.set_xlabel("Ano")
+    st.pyplot(fig)
+
+    st.dataframe(df_filtrado_log[['Ano', indicador_log]])
+
