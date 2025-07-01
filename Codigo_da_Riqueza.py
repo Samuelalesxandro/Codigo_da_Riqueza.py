@@ -402,7 +402,6 @@ def gerar_projecao_pib_dinamica(df_model, pais, modelo, ano_final=2035):
     return df_completo
 
 
-# --- Função para calcular cenários otimista e pessimista ---
 # =============================================================================
 # CÓDIGO PARA CORRIGIR AS PROJEÇÕES - ADICIONE ESTE BLOCO NO SEU ARQUIVO
 # =============================================================================
