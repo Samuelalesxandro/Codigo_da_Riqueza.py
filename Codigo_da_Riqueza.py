@@ -277,7 +277,7 @@ else:
     st.warning("Nenhum dado disponível para exibir.")
     
 # --- Função auxiliar para gerar projeções ---
-def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
+def gerar_projecao_pib(df_model, pais, modelo, ano_final=2035):
     df_pred = df_model.reset_index()
     df_pred = df_pred[df_pred['País'] == pais].sort_values("Ano")
 
@@ -285,7 +285,6 @@ def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
         raise ValueError("Dados insuficientes para o país selecionado.")
 
     df_pred['Ano'] = df_pred['Ano'].astype(int)
-
     df_base = df_pred.copy()
     ultimo_ano = df_base['Ano'].max()
     anos_futuros = list(range(ultimo_ano + 1, ano_final + 1))
@@ -293,33 +292,49 @@ def gerar_projecao_pib(df_model, pais, modelo, ano_final=2030):
     linha_atual = df_base[df_base['Ano'] == ultimo_ano].iloc[0].copy()
     linhas_futuras = []
 
+    # Calcular crescimento médio anual do PIB nos últimos 5 anos
+    df_pib = df_pred[['Ano', 'PIB_per_capita']].sort_values("Ano")
+    df_pib['Crescimento'] = df_pib['PIB_per_capita'].pct_change()
+    crescimento_medio = df_pib['Crescimento'].tail(5).mean()
+
     for ano in anos_futuros:
         nova_linha = linha_atual.copy()
         nova_linha['Ano'] = ano
 
-        cols_modelo = [col for col in df_base.columns if col.endswith('_lag1')]
-        X_input = pd.DataFrame([linha_atual[cols_modelo]])
+        # Atualiza os lags com os valores atuais
+        for col in df_base.columns:
+            if col.endswith('_lag1'):
+                base_col = col.replace('_lag1', '')
+                if base_col in linha_atual:
+                    nova_linha[col] = linha_atual[base_col]
 
+        X_input = pd.DataFrame([nova_linha[[col for col in nova_linha.index if col.endswith('_lag1')]]])
         pib_previsto = modelo.predict(X_input)[0]
-        nova_linha['PIB_per_capita'] = pib_previsto
 
-        for col in cols_modelo:
-            base_col = col.replace('_lag1', '')
-            if base_col in nova_linha:
-                nova_linha[col] = nova_linha[base_col]
+        # Ajusta com crescimento médio
+        pib_previsto *= (1 + crescimento_medio)
+        nova_linha['PIB_per_capita'] = pib_previsto
 
         linha_atual = nova_linha.copy()
         linhas_futuras.append(nova_linha)
 
-    df_futuro = pd.concat([df_base, pd.DataFrame(linhas_futuras)], ignore_index=True)
+    df_futuro = pd.concat([df_base] + [pd.DataFrame(linhas_futuras)], ignore_index=True)
     return df_futuro
 
 # Botão que usa a função para gerar projeções
 if st.button("Gerar projeções futuras"):
     try:
-        # Supondo que df_model, model, e pais_selecionado já estejam definidos
         df_projecoes = gerar_projecao_pib(df_model, pais_selecionado, model)
-        st.dataframe(df_projecoes)
-        # aqui você pode adicionar gráficos, download, etc.
+
+        # GRÁFICO DE PROJEÇÃO
+        fig, ax = plt.subplots(figsize=(10, 5))
+        df_plot = df_projecoes[['Ano', 'PIB_per_capita']].copy()
+        sns.lineplot(data=df_plot, x='Ano', y='PIB_per_capita', marker="o", ax=ax)
+        ax.set_title(f"Projeção do PIB per capita até {df_plot['Ano'].max()} — {pais_selecionado}")
+        ax.set_ylabel("PIB per capita")
+        ax.set_xlabel("Ano")
+        st.pyplot(fig)
+
+        st.dataframe(df_plot)
     except Exception as e:
         st.error(f"Erro ao gerar projeções futuras: {e}")
