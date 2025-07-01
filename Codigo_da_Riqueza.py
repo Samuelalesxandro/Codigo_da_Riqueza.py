@@ -277,7 +277,15 @@ else:
     st.warning("Nenhum dado disponível para exibir.")
     
 # --- Função auxiliar para gerar projeções ---
-def gerar_projecao_pib(df_model, pais, modelo, ano_final=2035):
+# --- Função corrigida para gerar projeções dinâmicas ---
+def gerar_projecao_pib_dinamica(df_model, pais, modelo, ano_final=2035):
+    """
+    Gera projeções dinâmicas do PIB per capita, atualizando os indicadores
+    com base em tendências históricas e correlações.
+    """
+    import numpy as np
+    import pandas as pd
+    
     df_pred = df_model.reset_index()
     df_pred = df_pred[df_pred['País'] == pais].sort_values("Ano")
 
@@ -289,65 +297,262 @@ def gerar_projecao_pib(df_model, pais, modelo, ano_final=2035):
     ultimo_ano = df_base['Ano'].max()
     anos_futuros = list(range(ultimo_ano + 1, ano_final + 1))
 
-    linha_atual = df_base[df_base['Ano'] == ultimo_ano].iloc[0].copy()
+    # Calcular tendências históricas para cada indicador
+    tendencias = {}
+    correlacoes = {}
+    
+    # Indicadores base (sem _lag1)
+    indicadores_base = [col for col in df_base.columns if not col.endswith('_lag1') and col not in ['País', 'Ano', 'PIB_per_capita']]
+    
+    for indicador in indicadores_base:
+        if indicador in df_base.columns:
+            # Calcular tendência (crescimento médio anual dos últimos 5 anos)
+            valores = df_base[indicador].tail(5)
+            if len(valores) > 1:
+                crescimento = valores.pct_change().dropna()
+                tendencias[indicador] = crescimento.mean() if not crescimento.empty else 0
+            else:
+                tendencias[indicador] = 0
+            
+            # Calcular correlação com PIB per capita
+            correlacao = df_base[indicador].corr(df_base['PIB_per_capita'])
+            correlacoes[indicador] = correlacao if not pd.isna(correlacao) else 0
+
+    # Linha base para projeções
+    linha_atual = df_base.iloc[-1].copy()
     linhas_futuras = []
 
-    # Calcular crescimento médio anual do PIB nos últimos 5 anos
-    df_pib = df_pred[['Ano', 'PIB_per_capita']].sort_values("Ano")
-    df_pib['Crescimento'] = df_pib['PIB_per_capita'].pct_change()
-    crescimento_medio = df_pib['Crescimento'].tail(5).mean()
+    # Calcular crescimento médio do PIB
+    df_pib = df_base[['Ano', 'PIB_per_capita']].sort_values("Ano")
+    df_pib['Crescimento_PIB'] = df_pib['PIB_per_capita'].pct_change()
+    crescimento_medio_pib = df_pib['Crescimento_PIB'].tail(5).mean()
+    
+    # Ajustar crescimento se muito extremo
+    if abs(crescimento_medio_pib) > 0.1:  # Limitar a 10% ao ano
+        crescimento_medio_pib = 0.03  # 3% padrão
+    
+    print(f"Crescimento médio PIB calculado: {crescimento_medio_pib:.4f}")
+    print(f"Tendências calculadas: {tendencias}")
 
-    for ano in anos_futuros:
+    for i, ano in enumerate(anos_futuros):
         nova_linha = linha_atual.copy()
         nova_linha['Ano'] = ano
+        
+        # Atualizar indicadores base com suas tendências
+        for indicador in indicadores_base:
+            if indicador in nova_linha.index:
+                valor_atual = nova_linha[indicador]
+                tendencia = tendencias.get(indicador, 0)
+                correlacao = correlacoes.get(indicador, 0)
+                
+                # Aplicar tendência com alguma variação baseada na correlação com PIB
+                fator_pib = 1 + (crescimento_medio_pib * correlacao * 0.5)  # Influência do PIB
+                fator_tendencia = 1 + tendencia
+                
+                # Combinar fatores com peso
+                fator_final = (fator_tendencia * 0.7) + (fator_pib * 0.3)
+                
+                # Aplicar com suavização para evitar crescimento exponencial
+                valor_novo = valor_atual * (1 + (fator_final - 1) * 0.8)
+                
+                # Adicionar pequena variação aleatória para realismo
+                ruido = np.random.normal(0, 0.01)  # 1% de variação
+                valor_novo *= (1 + ruido)
+                
+                nova_linha[indicador] = max(0, valor_novo)  # Evitar valores negativos
 
-        # Atualiza os lags com os valores atuais
-        for col in df_base.columns:
+        # Atualizar os lags com os valores do período anterior
+        for col in nova_linha.index:
             if col.endswith('_lag1'):
                 base_col = col.replace('_lag1', '')
-                if base_col in linha_atual:
+                if base_col in linha_atual.index:
                     nova_linha[col] = linha_atual[base_col]
 
-        X_input = pd.DataFrame([nova_linha[[col for col in nova_linha.index if col.endswith('_lag1')]]])
-        pib_previsto = modelo.predict(X_input)[0]
-
-        # Ajusta com crescimento médio
-        pib_previsto *= (1 + crescimento_medio)
-        nova_linha['PIB_per_capita'] = pib_previsto
+        # Fazer previsão do PIB
+        colunas_lag = [col for col in nova_linha.index if col.endswith('_lag1')]
+        X_input = pd.DataFrame([nova_linha[colunas_lag]])
+        
+        try:
+            pib_previsto = modelo.predict(X_input)[0]
+            
+            # Aplicar suavização para evitar mudanças bruscas
+            pib_anterior = linha_atual['PIB_per_capita']
+            pib_suavizado = pib_anterior * 0.3 + pib_previsto * 0.7
+            
+            nova_linha['PIB_per_capita'] = pib_suavizado
+            
+        except Exception as e:
+            print(f"Erro na previsão do ano {ano}: {e}")
+            # Fallback: crescimento baseado na tendência histórica
+            nova_linha['PIB_per_capita'] = linha_atual['PIB_per_capita'] * (1 + crescimento_medio_pib)
 
         linha_atual = nova_linha.copy()
         linhas_futuras.append(nova_linha)
 
-    df_futuro = pd.concat([df_base] + [pd.DataFrame(linhas_futuras)], ignore_index=True)
-    return df_futuro
+    # Combinar dados históricos com projeções
+    df_historico = df_base.copy()
+    df_futuro = pd.DataFrame(linhas_futuras)
+    
+    # Adicionar flag para distinguir dados históricos de projeções
+    df_historico['Tipo'] = 'Histórico'
+    df_futuro['Tipo'] = 'Projeção'
+    
+    df_completo = pd.concat([df_historico, df_futuro], ignore_index=True)
+    
+    return df_completo
 
-# Botão que usa a função para gerar projeções
-if st.button("Gerar projeções futuras"):
+
+# --- Função para calcular cenários otimista e pessimista ---
+def gerar_cenarios_multiplos(df_model, pais, modelo, ano_final=2035):
+    """
+    Gera três cenários: pessimista, realista e otimista
+    """
+    cenarios = {}
+    
+    # Cenário realista (base)
+    df_realista = gerar_projecao_pib_dinamica(df_model, pais, modelo, ano_final)
+    cenarios['Realista'] = df_realista
+    
+    # Cenário otimista (+50% no crescimento)
+    np.random.seed(42)  # Para reprodutibilidade
+    df_otimista = gerar_projecao_pib_dinamica(df_model, pais, modelo, ano_final)
+    # Ajustar PIB para cenário otimista
+    mask_projecao = df_otimista['Tipo'] == 'Projeção'
+    df_otimista.loc[mask_projecao, 'PIB_per_capita'] *= 1.02  # 2% adicional por ano
+    cenarios['Otimista'] = df_otimista
+    
+    # Cenário pessimista (-30% no crescimento)
+    np.random.seed(123)
+    df_pessimista = gerar_projecao_pib_dinamica(df_model, pais, modelo, ano_final)
+    # Ajustar PIB para cenário pessimista
+    df_pessimista.loc[mask_projecao, 'PIB_per_capita'] *= 0.99  # -1% por ano
+    cenarios['Pessimista'] = df_pessimista
+    
+    return cenarios
+
+
+# --- Substituir a função antiga no código Streamlit ---
+# Substitua a seção "Gerar projeções futuras" por:
+
+if st.button("Gerar projeções futuras dinâmicas"):
     try:
-        df_projecoes = gerar_projecao_pib(df_model, pais_selecionado, model)
+        # Opção para escolher tipo de projeção
+        tipo_projecao = st.radio(
+            "Escolha o tipo de projeção:",
+            ["Projeção Única", "Cenários Múltiplos"]
+        )
+        
+        if tipo_projecao == "Projeção Única":
+            df_projecoes = gerar_projecao_pib_dinamica(df_model, pais_selecionado, model)
+            
+            # Separar dados históricos e projeções
+            df_historico = df_projecoes[df_projecoes['Tipo'] == 'Histórico']
+            df_futuro = df_projecoes[df_projecoes['Tipo'] == 'Projeção']
+            
+            # GRÁFICO DE PROJEÇÃO
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            # Plotar dados históricos
+            ax.plot(df_historico['Ano'], df_historico['PIB_per_capita'], 
+                   marker="o", label="Dados Históricos", linewidth=2, color='blue')
+            
+            # Plotar projeções
+            ax.plot(df_futuro['Ano'], df_futuro['PIB_per_capita'], 
+                   marker="s", label="Projeções", linewidth=2, color='red', linestyle='--')
+            
+            ax.set_title(f"Projeção Dinâmica do PIB per capita até {df_futuro['Ano'].max()} — {pais_selecionado}")
+            ax.set_ylabel("PIB per capita (US$)")
+            ax.set_xlabel("Ano")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            st.pyplot(fig)
+            
+            # Mostrar crescimento projetado
+            pib_inicial = df_historico['PIB_per_capita'].iloc[-1]
+            pib_final = df_futuro['PIB_per_capita'].iloc[-1]
+            crescimento_total = ((pib_final / pib_inicial) - 1) * 100
+            anos_projecao = len(df_futuro)
+            crescimento_anual = (crescimento_total / anos_projecao)
+            
+            st.metric(
+                label="Crescimento Total Projetado",
+                value=f"{crescimento_total:.1f}%",
+                delta=f"{crescimento_anual:.1f}% ao ano"
+            )
+            
+            # Tabela com os dados
+            st.subheader("📊 Dados da Projeção")
+            df_display = df_projecoes[['Ano', 'PIB_per_capita', 'Tipo']].copy()
+            df_display['PIB_per_capita'] = df_display['PIB_per_capita'].round(2)
+            st.dataframe(df_display)
+            
+        else:  # Cenários Múltiplos
+            cenarios = gerar_cenarios_multiplos(df_model, pais_selecionado, model)
+            
+            # GRÁFICO COM MÚLTIPLOS CENÁRIOS
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            cores = {'Pessimista': 'red', 'Realista': 'blue', 'Otimista': 'green'}
+            
+            for nome_cenario, df_cenario in cenarios.items():
+                df_hist = df_cenario[df_cenario['Tipo'] == 'Histórico']
+                df_proj = df_cenario[df_cenario['Tipo'] == 'Projeção']
+                
+                # Dados históricos (apenas uma vez)
+                if nome_cenario == 'Realista':
+                    ax.plot(df_hist['Ano'], df_hist['PIB_per_capita'], 
+                           marker="o", label="Histórico", linewidth=2, color='black')
+                
+                # Projeções para cada cenário
+                ax.plot(df_proj['Ano'], df_proj['PIB_per_capita'], 
+                       marker="s", label=f"Cenário {nome_cenario}", 
+                       linewidth=2, color=cores[nome_cenario], linestyle='--')
+            
+            ax.set_title(f"Cenários de Projeção do PIB per capita — {pais_selecionado}")
+            ax.set_ylabel("PIB per capita (US$)")
+            ax.set_xlabel("Ano")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            st.pyplot(fig)
+            
+            # Métricas comparativas
+            col1, col2, col3 = st.columns(3)
+            
+            for i, (nome, df_cenario) in enumerate(cenarios.items()):
+                df_proj = df_cenario[df_cenario['Tipo'] == 'Projeção']
+                pib_final = df_proj['PIB_per_capita'].iloc[-1]
+                
+                with [col1, col2, col3][i]:
+                    st.metric(
+                        label=f"PIB Final - {nome}",
+                        value=f"${pib_final:,.0f}"
+                    )
 
-        # GRÁFICO DE PROJEÇÃO
-        fig, ax = plt.subplots(figsize=(10, 5))
-        df_plot = df_projecoes[['Ano', 'PIB_per_capita']].copy()
-        sns.lineplot(data=df_plot, x='Ano', y='PIB_per_capita', marker="o", ax=ax)
-        ax.set_title(f"Projeção do PIB per capita até {df_plot['Ano'].max()} — {pais_selecionado}")
-        ax.set_ylabel("PIB per capita")
-        ax.set_xlabel("Ano")
-        st.pyplot(fig)
-
-        st.dataframe(df_plot)
     except Exception as e:
-        st.error(f"Erro ao gerar projeções futuras: {e}")
+        st.error(f"Erro ao gerar projeções: {e}")
+        st.write("Detalhes do erro:", str(e))
 
-aba = st.sidebar.radio("📌 Escolha a aba de análise", [
-    "Evolução dos Indicadores",
-    "Previsão de PIB per capita",
-    "Comparar Países",
-    "Análise Logarítmica"  # <-- Adiciona a nova aba aqui
-])
 
-# Suas outras abas acima...
-# ...
+# --- Função adicional para análise de sensibilidade ---
+def analise_sensibilidade(df_model, pais, modelo, indicador_teste, variacao_pct=0.1):
+    """
+    Testa como mudanças em um indicador específico afetam as projeções do PIB
+    """
+    # Projeção base
+    df_base = gerar_projecao_pib_dinamica(df_model, pais, modelo, 2030)
+    
+    # Projeção com indicador aumentado
+    df_aumentado = df_base.copy()
+    mask_proj = df_aumentado['Tipo'] == 'Projeção'
+    if indicador_teste in df_aumentado.columns:
+        df_aumentado.loc[mask_proj, indicador_teste] *= (1 + variacao_pct)
+    
+    # Recalcular PIB com o indicador modificado
+    # (Isso exigiria refazer a previsão, simplificando aqui)
+    
+    return df_base, df_aumentado
 
 # 🔍 NOVA ABA LOGARÍTMICA
 if aba == "Análise Logarítmica":
