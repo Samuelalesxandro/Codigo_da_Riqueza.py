@@ -555,7 +555,7 @@ def analise_sensibilidade(df_model, pais, modelo, indicador_teste, variacao_pct=
     return df_base, df_aumentado
 
 # 🔍 NOVA ABA LOGARÍTMICA
-if aba == "Análise Logarítmica":
+if aba = "Análise Logarítmica":
     st.header("🔍 Análise Logarítmica de Indicadores")
 
     df_log = df.copy()
