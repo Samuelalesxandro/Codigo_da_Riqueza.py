@@ -43,9 +43,7 @@ DATA_FIM = datetime(2025, 4, 30)
 
 # Variáveis globais para cache manual
 _cached_data = None
-_cached_model = None
-_cached_r2 = None
-_cached_importance = None
+_cached_models = None
 
 def carregar_dados_banco_mundial():
     """Carrega dados do Banco Mundial"""
@@ -58,7 +56,7 @@ def carregar_dados_banco_mundial():
         print("🔄 Coletando dados do Banco Mundial...")
         df_raw = wbdata.get_dataframe(indicators=INDICADORES, country=TODOS_PAISES, date=(DATA_INICIO, DATA_FIM))
         print("✅ Dados coletados com sucesso.")
-        _cached_data = pd.DataFrame(df_raw)  # Converter para pandas normal
+        _cached_data = pd.DataFrame(df_raw)
         return _cached_data
     except Exception as e:
         st.error(f"❌ Erro ao baixar os dados: {e}")
@@ -108,95 +106,112 @@ def processar_dados(df_raw):
     
     return df, df_model
 
-def treinar_modelo_xgboost(df_model):
-    """Treina o modelo XGBoost"""
-    global _cached_model, _cached_r2, _cached_importance
+def treinar_todos_modelos(df_model):
+    """Treina e compara todos os modelos"""
+    global _cached_models
     
-    if _cached_model is not None:
-        return _cached_model, _cached_r2, _cached_importance
+    if _cached_models is not None:
+        return _cached_models
     
     TARGET = 'PIB_per_capita'
     PREDICTORS = [col for col in df_model.columns if '_lag1' in col]
     X = df_model[PREDICTORS]
     y = df_model[TARGET]
     
-    model = XGBRegressor(
-        n_estimators=150, 
-        learning_rate=0.05, 
-        max_depth=4, 
-        random_state=42, 
-        n_jobs=-1
-    )
-    model.fit(X, y)
-    
-    r2 = r2_score(y, model.predict(X))
-    importance = pd.Series(model.feature_importances_, index=PREDICTORS).sort_values(ascending=False)
-    
-    # Cache manual
-    _cached_model = model
-    _cached_r2 = r2
-    _cached_importance = importance
-    from sklearn.linear_model import LinearRegression, Ridge, Lasso
-    from sklearn.ensemble import RandomForestRegressor
-    from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-
-def comparar_modelos_basicos(X, y):
     modelos = {
-        "Regressão Linear (OLS)": LinearRegression(),
-        "Ridge": Ridge(alpha=1.0),
-        "Lasso": Lasso(alpha=0.1),
-        "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
-        "XGBoost": XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42)
+        "Regressão Linear": LinearRegression(),
+        "Ridge": Ridge(alpha=1.0, random_state=42),
+        "Lasso": Lasso(alpha=0.1, random_state=42),
+        "Árvore de Decisão": DecisionTreeRegressor(max_depth=6, random_state=42),
+        "Random Forest": RandomForestRegressor(n_estimators=100, max_depth=6, random_state=42, n_jobs=-1),
+        "XGBoost": XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42, n_jobs=-1)
     }
 
     resultados = []
+    modelos_treinados = {}
 
     for nome, modelo in modelos.items():
         modelo.fit(X, y)
         y_pred = modelo.predict(X)
+        
         r2 = r2_score(y, y_pred)
         rmse = mean_squared_error(y, y_pred, squared=False)
         mae = mean_absolute_error(y, y_pred)
-        resultados.append([nome, round(r2, 4), round(rmse, 2), round(mae, 2)])
+        
+        resultados.append({
+            'Modelo': nome,
+            'R²': round(r2, 4),
+            'RMSE': round(rmse, 2),
+            'MAE': round(mae, 2)
+        })
+        
+        modelos_treinados[nome] = modelo
+        
+        # Salvar importância das features para modelos tree-based
+        if hasattr(modelo, 'feature_importances_'):
+            importancia = pd.Series(modelo.feature_importances_, index=PREDICTORS).sort_values(ascending=False)
+            modelos_treinados[f"{nome}_importance"] = importancia
 
-    return resultados
+    # Cache manual
+    _cached_models = {
+        'resultados': pd.DataFrame(resultados).sort_values('R²', ascending=False),
+        'modelos': modelos_treinados,
+        'X': X,
+        'y': y,
+        'predictors': PREDICTORS
+    }
+    
+    return _cached_models
 
-    return model, r2, importance
-
-def gerar_projecao_dinamica(df_model, pais, modelo, ano_final=2035):
-    """Gera projeções dinâmicas do PIB per capita - VERSÃO CORRIGIDA"""
+def gerar_projecao_realista(df_model, pais, modelo, ano_final=2035):
+    """Gera projeções mais realistas do PIB per capita"""
     df_pred = df_model.reset_index()
     df_pred = df_pred[df_pred['País'] == pais].sort_values("Ano")
 
     if df_pred.empty:
         raise ValueError(f"Dados insuficientes para {pais}")
 
-    # CORREÇÃO: Garantir que a coluna Ano seja consistentemente int
     df_pred = df_pred.copy()
     df_pred['Ano'] = pd.to_numeric(df_pred['Ano'], errors='coerce').astype(int)
     
     ultimo_ano = int(df_pred['Ano'].max())
-    ano_final = int(ano_final)  # Garantir que ano_final também seja int
+    ano_final = int(ano_final)
     anos_futuros = list(range(ultimo_ano + 1, ano_final + 1))
     
     if not anos_futuros:
         return df_pred
     
-    # Calcular tendências históricas dos últimos 5 anos
-    df_recente = df_pred.tail(5)
+    # Calcular crescimento histórico médio dos últimos 10 anos (mais conservador)
+    df_recente = df_pred.tail(10)
+    crescimento_historico = []
+    
+    for i in range(1, len(df_recente)):
+        pib_anterior = df_recente.iloc[i-1]['PIB_per_capita']
+        pib_atual = df_recente.iloc[i]['PIB_per_capita']
+        if pib_anterior > 0:
+            crescimento = (pib_atual / pib_anterior) - 1
+            crescimento_historico.append(crescimento)
+    
+    # Crescimento médio histórico limitado
+    if crescimento_historico:
+        crescimento_medio = np.mean(crescimento_historico)
+        crescimento_medio = max(-0.05, min(0.05, crescimento_medio))  # Limitar entre -5% e +5%
+    else:
+        crescimento_medio = 0.02  # 2% padrão
+    
+    # Tendências mais conservadoras para outros indicadores
+    df_recente_5 = df_pred.tail(5)  # Usar apenas 5 anos para tendências
     tendencias = {}
     
-    # Identificar colunas base (sem _lag1)
     colunas_base = [col for col in df_pred.columns if not col.endswith('_lag1') and col not in ['País', 'Ano']]
     
     for col in colunas_base:
-        if len(df_recente) > 1:
-            valores = df_recente[col].values
-            # Calcular tendência linear
-            x = np.arange(len(valores))
+        if col != 'PIB_per_capita' and len(df_recente_5) > 1:
+            valores = df_recente_5[col].values
             if len(valores) > 1 and not np.isnan(valores).all():
-                coef = np.polyfit(x, valores, 1)[0]  # Coeficiente linear
-                tendencias[col] = coef
+                # Tendência mais suave
+                coef = np.polyfit(range(len(valores)), valores, 1)[0]
+                tendencias[col] = coef * 0.5  # Reduzir intensidade da tendência
             else:
                 tendencias[col] = 0
         else:
@@ -205,112 +220,123 @@ def gerar_projecao_dinamica(df_model, pais, modelo, ano_final=2035):
     # Preparar dados para projeção
     df_result = df_pred.copy()
     ultima_linha = df_pred.iloc[-1].copy()
-    
-    # Lista para armazenar novas linhas
     novas_linhas = []
     
-    for ano in anos_futuros:
+    for i, ano in enumerate(anos_futuros):
         nova_linha = ultima_linha.copy()
-        nova_linha['Ano'] = int(ano)  # CORREÇÃO: Garantir que seja int
+        nova_linha['Ano'] = int(ano)
         
-        # Atualizar indicadores base usando tendências
+        # Atualizar indicadores base com mudanças mais conservadoras
         for col in colunas_base:
-            if col != 'PIB_per_capita':  # PIB será calculado pelo modelo
+            if col != 'PIB_per_capita':
                 valor_atual = nova_linha[col]
                 tendencia = tendencias.get(col, 0)
                 
-                # Aplicar tendência com suavização
-                anos_desde_base = ano - ultimo_ano
-                fator_suavizacao = 0.95 ** anos_desde_base  # Decay exponencial
+                # Decay mais forte para projeções de longo prazo
+                anos_desde_base = i + 1
+                fator_decay = 0.90 ** anos_desde_base
                 
-                novo_valor = valor_atual + (tendencia * fator_suavizacao)
+                novo_valor = valor_atual + (tendencia * fator_decay)
                 
-                # Adicionar pequena variação aleatória (±2%)
-                variacao = np.random.normal(0, 0.02)
+                # Variação aleatória menor
+                variacao = np.random.normal(0, 0.01)  # ±1% ao invés de ±2%
                 novo_valor *= (1 + variacao)
                 
-                # Aplicar limites razoáveis
+                # Aplicar limites mais rigorosos
                 if col in ['Alfabetizacao_Jovens', 'Cobertura_Internet', 'Acesso_Eletricidade', 'Cobertura_Agua_Potavel']:
                     novo_valor = min(100, max(0, novo_valor))
                 elif col == 'Desemprego':
-                    novo_valor = min(50, max(0, novo_valor))
+                    novo_valor = min(30, max(0, novo_valor))  # Desemprego máximo 30%
                 elif col == 'Gini':
-                    novo_valor = min(100, max(20, novo_valor))
+                    novo_valor = min(80, max(20, novo_valor))
                 else:
+                    # Para indicadores econômicos, limitar mudanças extremas
+                    mudanca_maxima = valor_atual * 0.1  # Máximo 10% de mudança por ano
+                    novo_valor = max(valor_atual - mudanca_maxima, 
+                                   min(valor_atual + mudanca_maxima, novo_valor))
                     novo_valor = max(0, novo_valor)
                 
                 nova_linha[col] = novo_valor
         
-        # Atualizar variáveis lag com valores do período anterior
+        # Atualizar variáveis lag
         for col in df_pred.columns:
             if col.endswith('_lag1'):
                 col_base = col.replace('_lag1', '')
                 if col_base in ultima_linha.index:
                     nova_linha[col] = ultima_linha[col_base]
         
-        # Prever PIB per capita usando o modelo
-        colunas_lag = [c for c in nova_linha.index if c.endswith('_lag1')]
-        X_input = nova_linha[colunas_lag].values.reshape(1, -1)
-        
+        # Calcular PIB usando uma abordagem híbrida (modelo + tendência histórica)
         try:
-            pib_previsto = modelo.predict(X_input)[0]
+            colunas_lag = [c for c in nova_linha.index if c.endswith('_lag1')]
+            X_input = nova_linha[colunas_lag].values.reshape(1, -1)
+            pib_modelo = modelo.predict(X_input)[0]
             
-            # Suavizar mudanças bruscas
+            # Combinar previsão do modelo com tendência histórica
             pib_anterior = ultima_linha['PIB_per_capita']
-            crescimento = (pib_previsto / pib_anterior) - 1
+            pib_tendencia = pib_anterior * (1 + crescimento_medio)
             
-            # Limitar crescimento extremo a ±20% por ano
-            crescimento = max(-0.2, min(0.2, crescimento))
-            pib_final = pib_anterior * (1 + crescimento)
+            # Média ponderada: 60% modelo, 40% tendência histórica
+            peso_modelo = 0.6 * (0.95 ** i)  # Peso do modelo diminui com o tempo
+            peso_tendencia = 1 - peso_modelo
             
+            pib_combinado = (pib_modelo * peso_modelo) + (pib_tendencia * peso_tendencia)
+            
+            # Limitar crescimento anual a ±8%
+            crescimento_anual = (pib_combinado / pib_anterior) - 1
+            crescimento_anual = max(-0.08, min(0.08, crescimento_anual))
+            
+            pib_final = pib_anterior * (1 + crescimento_anual)
             nova_linha['PIB_per_capita'] = pib_final
             
         except Exception as e:
-            # Fallback: crescimento de 2% ao ano
-            nova_linha['PIB_per_capita'] = ultima_linha['PIB_per_capita'] * 1.02
+            # Fallback mais conservador
+            crescimento_fallback = max(-0.02, min(0.03, crescimento_medio))
+            nova_linha['PIB_per_capita'] = ultima_linha['PIB_per_capita'] * (1 + crescimento_fallback)
         
         novas_linhas.append(nova_linha)
-        ultima_linha = nova_linha  # Atualizar para próxima iteração
+        ultima_linha = nova_linha
     
     # Combinar dados originais com projeções
     if novas_linhas:
         df_novo = pd.DataFrame(novas_linhas)
-        # CORREÇÃO: Garantir que ambos DataFrames tenham Ano como int
         df_novo['Ano'] = df_novo['Ano'].astype(int)
         df_result['Ano'] = df_result['Ano'].astype(int)
         df_completo = pd.concat([df_result, df_novo], ignore_index=True)
     else:
         df_completo = df_result
     
-    # CORREÇÃO FINAL: Garantir que toda a coluna Ano seja int
     df_completo['Ano'] = df_completo['Ano'].astype(int)
-    
     return df_completo
 
-def gerar_cenarios(df_model, pais, modelo, ano_final=2035):
-    """Gera cenários otimista, realista e pessimista - VERSÃO CORRIGIDA"""
+def gerar_cenarios_realistas(df_model, pais, modelo, ano_final=2035):
+    """Gera cenários mais realistas"""
     cenarios = {}
-    
-    # Garantir que ano_final seja int
     ano_final = int(ano_final)
     
-    # Fixar seed para reprodutibilidade
+    # Cenário realista (base)
     np.random.seed(42)
-    df_realista = gerar_projecao_dinamica(df_model, pais, modelo, ano_final)
+    df_realista = gerar_projecao_realista(df_model, pais, modelo, ano_final)
     cenarios['Realista'] = df_realista
     
-    # Cenário otimista
-    np.random.seed(123)
-    df_otimista = gerar_projecao_dinamica(df_model, pais, modelo, ano_final)
     ultimo_ano_real = int(df_model.reset_index()['Ano'].max())
-    mask_futuro = df_otimista['Ano'] > ultimo_ano_real
-    df_otimista.loc[mask_futuro, 'PIB_per_capita'] *= 1.015  # +1.5% adicional
+    mask_futuro = df_realista['Ano'] > ultimo_ano_real
+    
+    # Cenário otimista (+1% adicional por ano, mais conservador)
+    np.random.seed(123)
+    df_otimista = gerar_projecao_realista(df_model, pais, modelo, ano_final)
+    if mask_futuro.any():
+        anos_futuros = df_otimista.loc[mask_futuro, 'Ano'] - ultimo_ano_real
+        multiplicador_otimista = (1.01 ** anos_futuros.values.reshape(-1, 1))
+        df_otimista.loc[mask_futuro, 'PIB_per_capita'] *= multiplicador_otimista.flatten()
     cenarios['Otimista'] = df_otimista
     
-    # Cenário pessimista
+    # Cenário pessimista (-1% por ano, mais conservador)
     np.random.seed(456)
-    df_pessimista = gerar_projecao_dinamica(df_model, pais, modelo, ano_final)
-    df_pessimista.loc[mask_futuro, 'PIB_per_capita'] *= 0.985  # -1.5%
+    df_pessimista = gerar_projecao_realista(df_model, pais, modelo, ano_final)
+    if mask_futuro.any():
+        anos_futuros = df_pessimista.loc[mask_futuro, 'Ano'] - ultimo_ano_real
+        multiplicador_pessimista = (0.99 ** anos_futuros.values.reshape(-1, 1))
+        df_pessimista.loc[mask_futuro, 'PIB_per_capita'] *= multiplicador_pessimista.flatten()
     cenarios['Pessimista'] = df_pessimista
     
     return cenarios
@@ -318,7 +344,7 @@ def gerar_cenarios(df_model, pais, modelo, ano_final=2035):
 # --- APLICAÇÃO STREAMLIT ---
 def main():
     st.set_page_config(page_title="Código da Riqueza", layout="wide")
-    st.title("📊 O Código da Riqueza — Painel Interativo")
+    st.title("📊 O Código da Riqueza — Painel Interativo Melhorado")
     
     # Inicializar dados na sessão se não existirem
     if 'df' not in st.session_state or 'df_model' not in st.session_state:
@@ -341,21 +367,110 @@ def main():
     df = st.session_state.df
     df_model = st.session_state.df_model
     
-    # Treinar modelo
-    if 'model' not in st.session_state:
-        with st.spinner("Treinando modelo XGBoost..."):
-            model, r2, importance = treinar_modelo_xgboost(df_model)
-            st.session_state.model = model
-            st.session_state.r2 = r2
-            st.session_state.importance = importance
+    # Treinar todos os modelos
+    if 'models_data' not in st.session_state:
+        with st.spinner("Treinando e comparando modelos..."):
+            models_data = treinar_todos_modelos(df_model)
+            st.session_state.models_data = models_data
     
-    model = st.session_state.model
-    r2 = st.session_state.r2
-    importance = st.session_state.importance
+    models_data = st.session_state.models_data
     
-    st.success(f"✅ Modelo treinado com R² = {r2:.4f}")
+    # --- SEÇÃO DE COMPARAÇÃO DE MODELOS ---
+    st.header("🤖 Comparação de Modelos de Machine Learning")
     
-    # Interface principal
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("📊 Performance dos Modelos")
+        
+        # Criar gráfico de comparação
+        df_resultados = models_data['resultados']
+        
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        
+        # R²
+        axes[0].bar(df_resultados['Modelo'], df_resultados['R²'], color='skyblue')
+        axes[0].set_title('R² Score')
+        axes[0].set_ylabel('R²')
+        axes[0].tick_params(axis='x', rotation=45)
+        
+        # RMSE
+        axes[1].bar(df_resultados['Modelo'], df_resultados['RMSE'], color='lightcoral')
+        axes[1].set_title('RMSE (menor é melhor)')
+        axes[1].set_ylabel('RMSE')
+        axes[1].tick_params(axis='x', rotation=45)
+        
+        # MAE
+        axes[2].bar(df_resultados['Modelo'], df_resultados['MAE'], color='lightgreen')
+        axes[2].set_title('MAE (menor é melhor)')
+        axes[2].set_ylabel('MAE')
+        axes[2].tick_params(axis='x', rotation=45)
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
+    
+    with col2:
+        st.subheader("🏆 Ranking dos Modelos")
+        st.dataframe(df_resultados, hide_index=True)
+        
+        melhor_modelo = df_resultados.iloc[0]['Modelo']
+        melhor_r2 = df_resultados.iloc[0]['R²']
+        st.success(f"**Melhor Modelo:** {melhor_modelo}\n\n**R²:** {melhor_r2}")
+    
+    # --- SELEÇÃO DO MODELO PARA PROJEÇÕES ---
+    st.subheader("🎯 Seleção do Modelo para Projeções")
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        modelo_escolhido = st.selectbox(
+            "Escolha o modelo para as projeções:",
+            options=df_resultados['Modelo'].tolist(),
+            index=0  # Por padrão, o melhor modelo
+        )
+        
+        modelo_selecionado = models_data['modelos'][modelo_escolhido]
+        
+        # Mostrar importância das features se disponível
+        if f"{modelo_escolhido}_importance" in models_data['modelos']:
+            st.subheader("📈 Importância das Variáveis")
+            importance = models_data['modelos'][f"{modelo_escolhido}_importance"]
+            
+            # Gráfico de importância
+            fig, ax = plt.subplots(figsize=(8, 6))
+            top_features = importance.head(10)
+            ax.barh(range(len(top_features)), top_features.values)
+            ax.set_yticks(range(len(top_features)))
+            ax.set_yticklabels([feat.replace('_lag1', '').replace('_', ' ') for feat in top_features.index])
+            ax.set_xlabel('Importância')
+            ax.set_title(f'Top 10 Variáveis - {modelo_escolhido}')
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+    
+    with col2:
+        # Métricas do modelo selecionado
+        modelo_info = df_resultados[df_resultados['Modelo'] == modelo_escolhido].iloc[0]
+        
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.metric("R² Score", f"{modelo_info['R²']:.4f}")
+        with col_b:
+            st.metric("RMSE", f"{modelo_info['RMSE']:.2f}")
+        with col_c:
+            st.metric("MAE", f"{modelo_info['MAE']:.2f}")
+        
+        st.info(f"""
+        **Interpretação das Métricas:**
+        - **R²**: {modelo_info['R²']:.1%} da variação do PIB é explicada pelo modelo
+        - **RMSE**: Erro médio de ±${modelo_info['RMSE']:,.0f} nas previsões
+        - **MAE**: Erro absoluto médio de ${modelo_info['MAE']:,.0f}
+        """)
+    
+    # --- INTERFACE PRINCIPAL (resto do código permanece similar) ---
+    st.header("📈 Análise por País")
+    
     st.sidebar.header("🔎 Filtros")
     paises = sorted(df['País'].unique())
     pais_selecionado = st.sidebar.selectbox("Selecione um país", paises)
@@ -372,7 +487,138 @@ def main():
     
     df_filtrado = df[(df['País'] == pais_selecionado) & (df['Ano'].between(ano_inicio, ano_fim))]
     
-    # Visualização básica
+    # --- PROJEÇÕES REALISTAS ---
+    st.subheader("🔮 Projeções Realistas do PIB per capita")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        ano_limite = st.selectbox("Projetar até o ano:", [2030, 2035, 2040], index=1)
+    with col2:
+        tipo_analise = st.selectbox("Tipo de análise:", ["Cenário Único", "Múltiplos Cenários"])
+    with col3:
+        mostrar_detalhes = st.checkbox("Mostrar detalhes dos cálculos")
+    
+    if st.button("🚀 Gerar Projeções Realistas"):
+        try:
+            with st.spinner(f"Gerando projeções para {pais_selecionado}..."):
+                
+                if tipo_analise == "Cenário Único":
+                    df_projecoes = gerar_projecao_realista(df_model, pais_selecionado, modelo_selecionado, ano_limite)
+                    
+                    ultimo_ano_real = int(df_model.reset_index()['Ano'].max())
+                    df_historico = df_projecoes[df_projecoes['Ano'] <= ultimo_ano_real]
+                    df_futuro = df_projecoes[df_projecoes['Ano'] > ultimo_ano_real]
+                    
+                    # Gráfico
+                    fig, ax = plt.subplots(figsize=(12, 6))
+                    
+                    ax.plot(df_historico['Ano'], df_historico['PIB_per_capita'], 
+                           'o-', label='Dados Históricos', linewidth=2, color='blue')
+                    
+                    if not df_futuro.empty:
+                        ax.plot(df_futuro['Ano'], df_futuro['PIB_per_capita'], 
+                               's--', label=f'Projeções ({modelo_escolhido})', linewidth=2, color='red', alpha=0.8)
+                    
+                    ax.set_title(f'Projeção PIB per capita - {pais_selecionado} (Modelo: {modelo_escolhido})')
+                    ax.set_xlabel('Ano')
+                    ax.set_ylabel('PIB per capita (US$)')
+                    ax.legend()
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    
+                    st.pyplot(fig)
+                    plt.close()
+                    
+                    # Métricas
+                    if not df_futuro.empty:
+                        pib_atual = df_historico['PIB_per_capita'].iloc[-1]
+                        pib_final = df_futuro['PIB_per_capita'].iloc[-1]
+                        crescimento_total = ((pib_final / pib_atual) - 1) * 100
+                        anos_projecao = len(df_futuro)
+                        crescimento_anual = (((pib_final / pib_atual) ** (1/anos_projecao)) - 1) * 100
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("PIB Atual", f"${pib_atual:,.0f}")
+                        with col2:
+                            st.metric("PIB Projetado", f"${pib_final:,.0f}")
+                        with col3:
+                            st.metric("Crescimento Anual", f"{crescimento_anual:.1f}%")
+                        
+                        # Aviso sobre realismo
+                        if crescimento_anual > 6:
+                            st.warning("⚠️ Crescimento alto projetado. Considere fatores externos que podem afetar essas previsões.")
+                        elif crescimento_anual < -2:
+                            st.warning("⚠️ Declínio econômico projetado. Políticas de estímulo podem ser necessárias.")
+                        else:
+                            st.success("✅ Projeção dentro de parâmetros econômicos realistas.")
+                
+                else:
+                    # Múltiplos cenários
+                    cenarios = gerar_cenarios_realistas(df_model, pais_selecionado, modelo_selecionado, ano_limite)
+                    
+                    fig, ax = plt.subplots(figsize=(12, 6))
+                    
+                    cores = {'Pessimista': '#ff6b6b', 'Realista': '#4ecdc4', 'Otimista': '#45b7d1'}
+                    ultimo_ano_real = int(df_model.reset_index()['Ano'].max())
+                    
+                    # Dados históricos
+                    df_hist = cenarios['Realista'][cenarios['Realista']['Ano'] <= ultimo_ano_real]
+                    ax.plot(df_hist['Ano'], df_hist['PIB_per_capita'], 
+                           'o-', label='Histórico', linewidth=3, color='black')
+                    
+                    # Plotar cada cenário
+                    for nome, df_cenario in cenarios.items():
+                        df_proj = df_cenario[df_cenario['Ano'] > ultimo_ano_real]
+                        if not df_proj.empty:
+                            ax.plot(df_proj['Ano'], df_proj['PIB_per_capita'], 
+                                   's--', label=f'Cenário {nome}', 
+                                   linewidth=2, color=cores[nome], alpha=0.8)
+                    
+                    ax.set_title(f'Cenários de Projeção PIB per capita - {pais_selecionado} (Modelo: {modelo_escolhido})')
+                    ax.set_xlabel('Ano')
+                    ax.set_ylabel('PIB per capita (US$)')
+                    ax.legend()
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    
+                    st.pyplot(fig)
+                    plt.close()
+                    
+                    # Métricas comparativas
+                    st.subheader("📊 Comparação de Cenários")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    dados_cenarios = []
+                    for i, (nome, df_cenario) in enumerate(cenarios.items()):
+                        df_proj = df_cenario[df_cenario['Ano'] > ultimo_ano_real]
+                        if not df_proj.empty:
+                            pib_inicial = df_hist['PIB_per_capita'].iloc[-1]
+                            pib_final = df_proj['PIB_per_capita'].iloc[-1]
+                            crescimento_anual = (((pib_final / pib_inicial) ** (1/len(df_proj))) - 1) * 100
+                            
+                            dados_cenarios.append({
+                                'Cenário': nome,
+                                'PIB Final': f"${pib_final:,.0f}",
+                                'Crescimento Anual': f"{crescimento_anual:.1f}%"
+                            })
+                            
+                            with [col1, col2, col3][i]:
+                                st.metric(f"PIB {nome}", f"${pib_final:,.0f}", f"{crescimento_anual:+.1f}% a.a.")
+                    
+                    # Tabela de comparação
+                    if dados_cenarios:
+                        df_comp_cenarios = pd.DataFrame(dados_cenarios)
+                        st.dataframe(df_comp_cenarios, hide_index=True)
+                
+                st.success("✅ Projeções geradas com sucesso!")
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao gerar projeções: {str(e)}")
+            if mostrar_detalhes:
+                st.exception(e)
+    
+    # --- VISUALIZAÇÃO BÁSICA ---
     st.subheader(f"📈 Evolução dos indicadores — {pais_selecionado} ({ano_inicio}–{ano_fim})")
     
     indicadores = [col for col in df.columns if col not in ['País', 'Ano']]
@@ -389,144 +635,31 @@ def main():
         st.pyplot(fig)
         plt.close()
     
-    # --- PROJEÇÕES DINÂMICAS ---
-    st.subheader("🔮 Projeções Dinâmicas do PIB per capita")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        ano_limite = st.selectbox("Projetar até o ano:", [2030, 2035, 2040], index=1)
-    with col2:
-        tipo_analise = st.selectbox("Tipo de análise:", ["Cenário Único", "Múltiplos Cenários"])
-    with col3:
-        mostrar_detalhes = st.checkbox("Mostrar detalhes dos cálculos")
-    
-    if st.button("🚀 Gerar Projeções Dinâmicas"):
-        try:
-            with st.spinner(f"Gerando projeções para {pais_selecionado}..."):
-                
-                if tipo_analise == "Cenário Único":
-                    # Projeção única
-                    df_projecoes = gerar_projecao_dinamica(df_model, pais_selecionado, model, ano_limite)
-                    
-                    # Separar histórico de projeções - CORREÇÃO: Garantir tipos consistentes
-                    ultimo_ano_real = int(df_model.reset_index()['Ano'].max())
-                    df_historico = df_projecoes[df_projecoes['Ano'] <= ultimo_ano_real]
-                    df_futuro = df_projecoes[df_projecoes['Ano'] > ultimo_ano_real]
-                    
-                    # Gráfico
-                    fig, ax = plt.subplots(figsize=(12, 6))
-                    
-                    ax.plot(df_historico['Ano'], df_historico['PIB_per_capita'], 
-                           'o-', label='Dados Históricos', linewidth=2, color='blue')
-                    
-                    if not df_futuro.empty:
-                        ax.plot(df_futuro['Ano'], df_futuro['PIB_per_capita'], 
-                               's--', label='Projeções', linewidth=2, color='red', alpha=0.8)
-                    
-                    ax.set_title(f'Projeção PIB per capita - {pais_selecionado}')
-                    ax.set_xlabel('Ano')
-                    ax.set_ylabel('PIB per capita (US$)')
-                    ax.legend()
-                    ax.grid(True, alpha=0.3)
-                    plt.tight_layout()
-                    
-                    st.pyplot(fig)
-                    plt.close()
-                    
-                    # Métricas
-                    if not df_futuro.empty:
-                        pib_atual = df_historico['PIB_per_capita'].iloc[-1]
-                        pib_final = df_futuro['PIB_per_capita'].iloc[-1]
-                        crescimento_total = ((pib_final / pib_atual) - 1) * 100
-                        anos_projecao = len(df_futuro)
-                        crescimento_anual = crescimento_total / anos_projecao
-                        
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("PIB Atual", f"${pib_atual:,.0f}")
-                        with col2:
-                            st.metric("PIB Projetado", f"${pib_final:,.0f}")
-                        with col3:
-                            st.metric("Crescimento Anual", f"{crescimento_anual:.1f}%")
-                    
-                    # Tabela de dados
-                    if mostrar_detalhes:
-                        st.subheader("📋 Dados Detalhados")
-                        df_display = df_projecoes[['Ano', 'PIB_per_capita']].copy()
-                        df_display['Tipo'] = df_display['Ano'].apply(
-                            lambda x: 'Histórico' if x <= ultimo_ano_real else 'Projeção'
-                        )
-                        df_display['PIB_per_capita'] = df_display['PIB_per_capita'].round(2)
-                        st.dataframe(df_display)
-                
-                else:
-                    # Múltiplos cenários
-                    cenarios = gerar_cenarios(df_model, pais_selecionado, model, ano_limite)
-                    
-                    # Gráfico comparativo
-                    fig, ax = plt.subplots(figsize=(12, 6))
-                    
-                    cores = {'Pessimista': '#ff4444', 'Realista': '#4444ff', 'Otimista': '#44ff44'}
-                    ultimo_ano_real = int(df_model.reset_index()['Ano'].max())
-                    
-                    # Plotar dados históricos apenas uma vez
-                    df_hist = cenarios['Realista'][cenarios['Realista']['Ano'] <= ultimo_ano_real]
-                    ax.plot(df_hist['Ano'], df_hist['PIB_per_capita'], 
-                           'o-', label='Histórico', linewidth=3, color='black')
-                    
-                    # Plotar cada cenário
-                    for nome, df_cenario in cenarios.items():
-                        df_proj = df_cenario[df_cenario['Ano'] > ultimo_ano_real]
-                        if not df_proj.empty:
-                            ax.plot(df_proj['Ano'], df_proj['PIB_per_capita'], 
-                                   's--', label=f'Cenário {nome}', 
-                                   linewidth=2, color=cores[nome], alpha=0.8)
-                    
-                    ax.set_title(f'Cenários de Projeção PIB per capita - {pais_selecionado}')
-                    ax.set_xlabel('Ano')
-                    ax.set_ylabel('PIB per capita (US$)')
-                    ax.legend()
-                    ax.grid(True, alpha=0.3)
-                    plt.tight_layout()
-                    
-                    st.pyplot(fig)
-                    plt.close()
-                    
-                    # Métricas comparativas
-                    st.subheader("📊 Comparação de Cenários")
-                    col1, col2, col3 = st.columns(3)
-                    
-                    for i, (nome, df_cenario) in enumerate(cenarios.items()):
-                        df_proj = df_cenario[df_cenario['Ano'] > ultimo_ano_real]
-                        if not df_proj.empty:
-                            pib_final = df_proj['PIB_per_capita'].iloc[-1]
-                            with [col1, col2, col3][i]:
-                                st.metric(f"PIB {nome}", f"${pib_final:,.0f}")
-                
-                st.success("✅ Projeções geradas com sucesso!")
-                
-        except Exception as e:
-            st.error(f"❌ Erro ao gerar projeções: {str(e)}")
-            if mostrar_detalhes:
-                st.exception(e)
-    
-    # --- ANÁLISE DE SENSIBILIDADE ---
+    # --- ANÁLISE DE SENSIBILIDADE MELHORADA ---
     st.subheader("🎯 Análise de Sensibilidade")
     
     if st.checkbox("Ativar análise de sensibilidade"):
-        st.write("Esta análise mostra como mudanças em indicadores específicos afetam as projeções do PIB.")
+        col1, col2 = st.columns(2)
         
-        # Selecionar indicador para testar
-        indicadores_disponiveis = [col.replace('_lag1', '') for col in df_model.columns if col.endswith('_lag1')]
-        indicador_teste = st.selectbox("Selecione o indicador para testar:", indicadores_disponiveis)
+        with col1:
+            indicadores_disponiveis = [col.replace('_lag1', '') for col in df_model.columns if col.endswith('_lag1')]
+            indicador_teste = st.selectbox("Selecione o indicador para testar:", indicadores_disponiveis)
+            variacao = st.slider("Variação percentual do indicador:", -50, 50, 10, 5)
         
-        # Percentual de variação
-        variacao = st.slider("Variação percentual do indicador:", -50, 50, 10, 5)
+        with col2:
+            st.info(f"""
+            **Análise de Sensibilidade**
+            
+            Esta análise mostra como mudanças no indicador **{indicador_teste.replace('_', ' ')}** 
+            afetam as projeções do PIB per capita.
+            
+            **Variação:** {variacao:+}%
+            """)
         
         if st.button("Executar Análise de Sensibilidade"):
             try:
                 # Projeção base
-                df_base = gerar_projecao_dinamica(df_model, pais_selecionado, model, 2030)
+                df_base = gerar_projecao_realista(df_model, pais_selecionado, modelo_selecionado, 2030)
                 
                 # Criar versão modificada dos dados
                 df_modificado = df_model.copy()
@@ -536,9 +669,8 @@ def main():
                     df_modificado[col_lag] *= (1 + variacao/100)
                     
                     # Nova projeção com indicador modificado
-                    df_sensibilidade = gerar_projecao_dinamica(df_modificado, pais_selecionado, model, 2030)
+                    df_sensibilidade = gerar_projecao_realista(df_modificado, pais_selecionado, modelo_selecionado, 2030)
                     
-                    # CORREÇÃO: Garantir tipos consistentes para comparações
                     df_base['Ano'] = pd.to_numeric(df_base['Ano'], errors='coerce').astype(int)
                     df_sensibilidade['Ano'] = pd.to_numeric(df_sensibilidade['Ano'], errors='coerce').astype(int)
                     ultimo_ano_real = int(df_model.reset_index()['Ano'].max())
@@ -557,13 +689,13 @@ def main():
                     
                     if not df_proj_base.empty:
                         ax.plot(df_proj_base['Ano'], df_proj_base['PIB_per_capita'], 
-                               's--', label='Projeção Base', linewidth=2, color='blue')
+                               's--', label=f'Projeção Base ({modelo_escolhido})', linewidth=2, color='blue')
                     
                     if not df_proj_sens.empty:
                         ax.plot(df_proj_sens['Ano'], df_proj_sens['PIB_per_capita'], 
-                               's--', label=f'{indicador_teste} {variacao:+}%', linewidth=2, color='red')
+                               's--', label=f'{indicador_teste.replace("_", " ")} {variacao:+}%', linewidth=2, color='red')
                     
-                    ax.set_title(f'Análise de Sensibilidade - {indicador_teste}')
+                    ax.set_title(f'Análise de Sensibilidade - {indicador_teste.replace("_", " ")}')
                     ax.set_xlabel('Ano')
                     ax.set_ylabel('PIB per capita (US$)')
                     ax.legend()
@@ -579,14 +711,30 @@ def main():
                         pib_sens_final = float(df_proj_sens['PIB_per_capita'].iloc[-1])
                         impacto = ((pib_sens_final / pib_base_final) - 1) * 100
                         
-                        st.metric(
-                            f"Impacto no PIB final ({variacao:+}% em {indicador_teste})",
-                            f"{impacto:+.2f}%"
-                        )
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric(
+                                f"Impacto no PIB final",
+                                f"{impacto:+.2f}%",
+                                f"Variação de {variacao:+}% em {indicador_teste.replace('_', ' ')}"
+                            )
                         
-                        # Elasticidade
-                        elasticidade = impacto / variacao if variacao != 0 else 0
-                        st.info(f"**Elasticidade:** {elasticidade:.3f} (variação de 1% em {indicador_teste} resulta em {elasticidade:.3f}% de mudança no PIB)")
+                        with col2:
+                            # Elasticidade
+                            elasticidade = impacto / variacao if variacao != 0 else 0
+                            st.metric(
+                                "Elasticidade",
+                                f"{elasticidade:.3f}",
+                                "Impacto por 1% de mudança"
+                            )
+                        
+                        # Interpretação
+                        if abs(elasticidade) > 0.5:
+                            st.warning(f"⚠️ **Alta sensibilidade**: {indicador_teste.replace('_', ' ')} tem grande impacto no PIB")
+                        elif abs(elasticidade) > 0.1:
+                            st.info(f"📊 **Sensibilidade moderada**: {indicador_teste.replace('_', ' ')} tem impacto moderado no PIB")
+                        else:
+                            st.success(f"✅ **Baixa sensibilidade**: {indicador_teste.replace('_', ' ')} tem pouco impacto no PIB")
                     else:
                         st.warning("Dados insuficientes para calcular o impacto")
                 else:
@@ -594,7 +742,6 @@ def main():
                 
             except Exception as e:
                 st.error(f"❌ Erro na análise de sensibilidade: {str(e)}")
-                st.exception(e)  # Para debug
     
     # --- COMPARAÇÃO ENTRE PAÍSES ---
     st.subheader("🌍 Comparação de Crescimento Projetado")
@@ -617,48 +764,38 @@ def main():
                 cores = plt.cm.Set3(np.linspace(0, 1, len(paises_comparacao)))
                 
                 dados_comparacao = []
-                
-                # CORREÇÃO: Garantir que ultimo_ano_real seja int e consistente
                 df_anos = df_model.reset_index()
                 df_anos['Ano'] = pd.to_numeric(df_anos['Ano'], errors='coerce').astype(int)
                 ultimo_ano_real = int(df_anos['Ano'].max())
                 
                 for i, pais in enumerate(paises_comparacao):
                     try:
-                        # Gerar projeção para o país
-                        df_pais = gerar_projecao_dinamica(df_model, pais, model, 2035)
-                        
-                        # CORREÇÃO: Garantir que df_pais tenha Ano como int
+                        df_pais = gerar_projecao_realista(df_model, pais, modelo_selecionado, 2035)
                         df_pais['Ano'] = pd.to_numeric(df_pais['Ano'], errors='coerce').astype(int)
                         
-                        # Separar dados históricos e projeções
                         df_hist = df_pais[df_pais['Ano'] <= ultimo_ano_real].copy()
                         df_proj = df_pais[df_pais['Ano'] > ultimo_ano_real].copy()
                         
-                        # Plotar dados históricos
                         if not df_hist.empty:
                             ax.plot(df_hist['Ano'], df_hist['PIB_per_capita'], 
                                    'o-', color=cores[i], alpha=0.7, linewidth=2)
                         
-                        # Plotar projeções
                         if not df_proj.empty:
                             ax.plot(df_proj['Ano'], df_proj['PIB_per_capita'], 
                                    's--', color=cores[i], alpha=0.9, linewidth=2, label=pais)
                         
-                        # Calcular métricas de crescimento
                         if not df_proj.empty and not df_hist.empty:
                             pib_inicial = float(df_hist['PIB_per_capita'].iloc[-1])
                             pib_final = float(df_proj['PIB_per_capita'].iloc[-1])
-                            crescimento = ((pib_final / pib_inicial) - 1) * 100
                             anos_projecao = len(df_proj)
-                            crescimento_anual = crescimento / anos_projecao if anos_projecao > 0 else 0
+                            crescimento_anual = (((pib_final / pib_inicial) ** (1/anos_projecao)) - 1) * 100
                             
                             dados_comparacao.append({
                                 'País': pais,
                                 'PIB Atual': pib_inicial,
                                 'PIB Projetado': pib_final,
-                                'Crescimento Total (%)': crescimento,
-                                'Crescimento Anual (%)': crescimento_anual
+                                'Crescimento Anual': crescimento_anual,
+                                'Modelo': modelo_escolhido
                             })
                         
                         st.success(f"✅ Projeção gerada para {pais}")
@@ -667,9 +804,8 @@ def main():
                         st.error(f"❌ Erro ao processar {pais}: {str(e)}")
                         continue
                 
-                # Finalizar gráfico
-                if dados_comparacao:  # Só plotar se tiver dados válidos
-                    ax.set_title('Comparação de Crescimento Projetado entre Países')
+                if dados_comparacao:
+                    ax.set_title(f'Comparação de Crescimento Projetado entre Países (Modelo: {modelo_escolhido})')
                     ax.set_xlabel('Ano')
                     ax.set_ylabel('PIB per capita (US$)')
                     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -681,10 +817,17 @@ def main():
                     
                     # Tabela comparativa
                     df_comp = pd.DataFrame(dados_comparacao)
-                    df_comp = df_comp.sort_values('Crescimento Anual (%)', ascending=False)
+                    df_comp = df_comp.sort_values('Crescimento Anual', ascending=False)
                     
                     st.subheader("📊 Ranking de Crescimento Projetado")
-                    st.dataframe(df_comp.round(2))
+                    
+                    # Formatação da tabela
+                    df_display = df_comp.copy()
+                    df_display['PIB Atual'] = df_display['PIB Atual'].apply(lambda x: f"${x:,.0f}")
+                    df_display['PIB Projetado'] = df_display['PIB Projetado'].apply(lambda x: f"${x:,.0f}")
+                    df_display['Crescimento Anual'] = df_display['Crescimento Anual'].apply(lambda x: f"{x:.1f}%")
+                    
+                    st.dataframe(df_display, hide_index=True)
                     
                     # Destacar o melhor e pior desempenho
                     if len(df_comp) > 1:
@@ -693,157 +836,15 @@ def main():
                         
                         col1, col2 = st.columns(2)
                         with col1:
-                            st.success(f"🏆 **Maior crescimento:** {melhor['País']} ({melhor['Crescimento Anual (%)']:.1f}% ao ano)")
+                            st.success(f"🏆 **Maior crescimento:** {melhor['País']} ({melhor['Crescimento Anual']:.1f}% ao ano)")
                         with col2:
-                            st.info(f"📉 **Menor crescimento:** {pior['País']} ({pior['Crescimento Anual (%)']:.1f}% ao ano)")
+                            st.info(f"📉 **Menor crescimento:** {pior['País']} ({pior['Crescimento Anual']:.1f}% ao ano)")
                 else:
                     plt.close()
                     st.warning("❌ Nenhuma projeção foi gerada com sucesso para os países selecionados.")
             
             except Exception as e:
                 st.error(f"❌ Erro geral na comparação: {str(e)}")
-                st.exception(e)  # Para debug
-    
-    # --- RELATÓRIO DE PROJEÇÕES ---
-    st.subheader("📄 Gerar Relatório de Projeções")
-    
-    if st.button("Gerar Relatório Completo"):
-        try:
-            df_projecoes = gerar_projecao_dinamica(df_model, pais_selecionado, model, 2035)
-            ultimo_ano_real = int(df_model.reset_index()['Ano'].max())
-            df_historico = df_projecoes[df_projecoes['Ano'] <= ultimo_ano_real]
-            df_futuro = df_projecoes[df_projecoes['Ano'] > ultimo_ano_real]
-            
-            if not df_futuro.empty and not df_historico.empty:
-                pib_atual = df_historico['PIB_per_capita'].iloc[-1]
-                pib_final = df_futuro['PIB_per_capita'].iloc[-1]
-                crescimento_total = ((pib_final / pib_atual) - 1) * 100
-                crescimento_anual = (((pib_final / pib_atual) ** (1/len(df_futuro))) - 1) * 100
-                
-                relatorio = f"""
-# 📊 Relatório de Projeções Econômicas
-## País: {pais_selecionado}
-## Data: {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}
-
-### 🔍 Resumo Executivo
-- **Período de projeção:** {df_futuro['Ano'].min()} - {df_futuro['Ano'].max()}
-- **PIB per capita atual:** US$ {pib_atual:,.2f}
-- **PIB per capita projetado:** US$ {pib_final:,.2f}
-- **Crescimento total:** {crescimento_total:.1f}%
-- **Crescimento anual médio:** {crescimento_anual:.1f}%
-
-### 📈 Metodologia
-Esta projeção foi gerada usando um modelo XGBoost treinado com dados do Banco Mundial.
-O modelo considera indicadores defasados (lag-1) para prever o PIB per capita futuro.
-
-**Principais características do modelo:**
-- R² de treino: {r2:.4f}
-- Indicadores mais importantes: {', '.join(importance.head(3).index)}
-
-### ⚠️ Limitações e Considerações
-- As projeções assumem continuidade das tendências históricas
-- Não consideram choques externos (crises, pandemias, guerras)
-- Baseadas em dados até {ultimo_ano_real}
-- Margem de erro esperada: ±15-20%
-
-### 📋 Dados Detalhados
-Consulte os dados completos no painel interativo.
-                """
-                
-                st.markdown(relatorio)
-                
-                # Permitir download do relatório
-                st.download_button(
-                    label="📥 Baixar Relatório (Markdown)",
-                    data=relatorio.encode('utf-8'),
-                    file_name=f"relatorio_projecoes_{pais_selecionado}_{pd.Timestamp.now().strftime('%Y%m%d')}.md",
-                    mime='text/markdown'
-                )
-                
-                # Baixar dados da projeção
-                csv_data = df_projecoes[['Ano', 'PIB_per_capita']].to_csv(index=False)
-                st.download_button(
-                    label="📥 Baixar Dados da Projeção (CSV)",
-                    data=csv_data.encode('utf-8'),
-                    file_name=f"projecoes_{pais_selecionado}_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
-                    mime='text/csv'
-                )
-            else:
-                st.error("Dados insuficientes para gerar relatório")
-                
-        except Exception as e:
-            st.error(f"Erro ao gerar relatório: {str(e)}")
-    
-    # --- RECOMENDAÇÕES DE POLÍTICA ECONÔMICA ---
-    st.subheader("💡 Recomendações de Política Econômica")
-    
-    if st.button("Gerar Recomendações Automáticas"):
-        try:
-            df_projecoes = gerar_projecao_dinamica(df_model, pais_selecionado, model, 2030)
-            ultimo_ano_real = int(df_model.reset_index()['Ano'].max())
-            df_futuro = df_projecoes[df_projecoes['Ano'] > ultimo_ano_real]
-            
-            if not df_futuro.empty:
-                recomendacoes = []
-                crescimento_medio = df_futuro['PIB_per_capita'].pct_change().mean()
-                
-                if crescimento_medio < 0.01:  # Menos de 1% ao ano
-                    recomendacoes.append("⚠️ **Crescimento baixo projetado:** Considerar políticas de estímulo ao investimento e inovação.")
-                
-                if crescimento_medio > 0.08:  # Mais de 8% ao ano
-                    recomendacoes.append("🚨 **Crescimento muito alto:** Atenção para possível sobreaquecimento da economia.")
-                
-                # Verificar indicadores específicos nas projeções
-                if 'Cobertura_Internet' in df_futuro.columns:
-                    internet_final = df_futuro['Cobertura_Internet'].iloc[-1]
-                    if internet_final < 80:
-                        recomendacoes.append("📡 **Infraestrutura digital:** Investir em expansão da cobertura de internet.")
-                
-                if 'Alfabetizacao_Jovens' in df_futuro.columns:
-                    alfabetizacao = df_futuro['Alfabetizacao_Jovens'].iloc[-1]
-                    if alfabetizacao < 95:
-                        recomendacoes.append("📚 **Educação:** Priorizar programas de alfabetização juvenil.")
-                
-                if recomendacoes:
-                    st.write(f"**Recomendações para {pais_selecionado}:**")
-                    for rec in recomendacoes:
-                        st.write(rec)
-                else:
-                    st.success("✅ As projeções indicam uma trajetória equilibrada de crescimento.")
-            else:
-                st.warning("Dados insuficientes para gerar recomendações")
-                
-        except Exception as e:
-            st.error(f"Erro ao gerar recomendações: {str(e)}")
-    
-    # --- COMPARAÇÃO ENTRE DOIS PAÍSES ---
-    st.subheader("📊 Comparar dois países lado a lado")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        pais_1 = st.selectbox("País 1", paises, index=0, key="pais1")
-    with col2:
-        pais_2 = st.selectbox("País 2", paises, index=min(1, len(paises)-1), key="pais2")
-    
-    indicador_comp = st.selectbox("Indicador para comparar", indicadores, key="indicador_comp")
-    
-    if st.button("Comparar Países"):
-        df_p1 = df[(df['País'] == pais_1) & (df['Ano'].between(ano_inicio, ano_fim))]
-        df_p2 = df[(df['País'] == pais_2) & (df['Ano'].between(ano_inicio, ano_fim))]
-        
-        if not df_p1.empty and not df_p2.empty:
-            fig, ax = plt.subplots(figsize=(10, 5))
-            sns.lineplot(data=df_p1, x="Ano", y=indicador_comp, label=pais_1, marker="o", ax=ax)
-            sns.lineplot(data=df_p2, x="Ano", y=indicador_comp, label=pais_2, marker="o", ax=ax)
-            ax.set_title(f"{indicador_comp.replace('_', ' ')} — {pais_1} vs {pais_2}")
-            ax.set_ylabel(indicador_comp.replace('_', ' '))
-            ax.set_xlabel("Ano")
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
-        else:
-            st.warning("Dados insuficientes para comparação")
     
     # --- DADOS FILTRADOS ---
     st.subheader("📋 Dados filtrados")
@@ -859,25 +860,51 @@ Consulte os dados completos no painel interativo.
     else:
         st.warning("Nenhum dado disponível para os filtros selecionados")
     
-    # --- INFORMAÇÕES DO MODELO ---
-    with st.expander("🔍 Informações do Modelo"):
-        st.write(f"**R² do modelo:** {r2:.4f}")
-        st.write("**Top 5 indicadores mais importantes:**")
-        for i, (var, imp) in enumerate(importance.head(5).items(), 1):
-            st.write(f"{i}. {var}: {imp:.4f}")
+    # --- INFORMAÇÕES DETALHADAS DO MODELO ---
+    with st.expander("🔍 Informações Detalhadas dos Modelos"):
         
-        st.write(f"**Total de países:** {len(df['País'].unique())}")
+        # Métricas de todos os modelos
+        st.subheader("📊 Métricas Completas")
+        st.dataframe(models_data['resultados'], hide_index=True)
+        
+        # Informações do modelo selecionado
+        st.subheader(f"🎯 Modelo Selecionado: {modelo_escolhido}")
+        modelo_info = models_data['resultados'][models_data['resultados']['Modelo'] == modelo_escolhido].iloc[0]
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("R² Score", f"{modelo_info['R²']:.4f}")
+        with col2:
+            st.metric("RMSE", f"{modelo_info['RMSE']:.2f}")
+        with col3:
+            st.metric("MAE", f"{modelo_info['MAE']:.2f}")
+        with col4:
+            st.metric("Total Observações", f"{len(models_data['y']):,}")
+        
         st.write(f"**Período dos dados:** {df['Ano'].min()} - {df['Ano'].max()}")
-        st.write(f"**Total de observações:** {len(df_model)}")
+        st.write(f"**Total de países:** {len(df['País'].unique())}")
+        st.write(f"**Número de preditores:** {len(models_data['predictors'])}")
+        
+        # Explicação das métricas
+        st.info("""
+        **📚 Explicação das Métricas:**
+        - **R²**: Proporção da variância explicada pelo modelo (0-1, maior é melhor)
+        - **RMSE**: Raiz do erro quadrático médio em US$ (menor é melhor)
+        - **MAE**: Erro absoluto médio em US$ (menor é melhor)
+        
+        **🎯 Interpretação:**
+        - R² > 0.8: Excelente poder explicativo
+        - R² 0.6-0.8: Bom poder explicativo  
+        - R² < 0.6: Poder explicativo limitado
+        """)
 
 # --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
-    # Executar aplicação Streamlit
     main()
 else:
     # Executar código inicial quando importado
     try:
-        print("--- INICIANDO ANÁLISE: O CÓDIGO DA RIQUEZA ---")
+        print("--- INICIANDO ANÁLISE: O CÓDIGO DA RIQUEZA (VERSÃO MELHORADA) ---")
         print("🔄 Coletando dados do Banco Mundial...")
         df_raw = wbdata.get_dataframe(indicators=INDICADORES, country=TODOS_PAISES, date=(DATA_INICIO, DATA_FIM))
         print("✅ Dados coletados com sucesso.")
@@ -889,33 +916,28 @@ else:
             print(df.head())
             print(f"\n📈 Tamanho do dataset final para modelagem: {df_model.shape[0]} observações.")
             
-            # Treinar modelo
-            print("\n🚀 Treinando modelo XGBoost para prever PIB per capita...")
-            model, r2, importance = treinar_modelo_xgboost(df_model)
-            print(f"\n📌 Poder de explicação do modelo (R² no treino): {r2:.4f}")
-            print("\n🏆 Fatores mais importantes para o crescimento econômico:")
-            print(importance.head(10))
+            # Treinar e comparar todos os modelos
+            print("\n🚀 Treinando e comparando modelos...")
+            models_data = treinar_todos_modelos(df_model)
+            
+            print("\n🏆 Comparação de Modelos:")
+            print(models_data['resultados'].to_string(index=False))
+            
+            melhor_modelo = models_data['resultados'].iloc[0]['Modelo']
+            melhor_r2 = models_data['resultados'].iloc[0]['R²']
+            print(f"\n🥇 Melhor modelo: {melhor_modelo} (R² = {melhor_r2:.4f})")
             
             # Exportar dados
             print("\n💾 Exportando dados e resultados...")
             df_export = df_model.reset_index()
             df_export.to_csv("dados_modelo_completos.csv", index=False)
-            importance.to_csv("importancia_geral.csv")
+            models_data['resultados'].to_csv("comparacao_modelos.csv", index=False)
             
-            print("\n🖥️ Execute: streamlit run codigo_riqueza_final.py")
+            print("\n🖥️ Execute: streamlit run codigo_riqueza_melhorado.py")
             
         else:
             print("❌ Erro no processamento dos dados")
             
     except Exception as e:
         print(f"❌ Erro na execução: {e}")
-        print("Execute com: streamlit run codigo_riqueza_final.py")
-TARGET = 'PIB_per_capita'
-PREDICTORS = [col for col in df_model.columns if '_lag1' in col]
-X = df_model[PREDICTORS]
-y = df_model[TARGET]
-
-resultados_modelos = comparar_modelos_basicos(X, y)
-
-for resultado in resultados_modelos:
-    print(f"{resultado[0]:<25} | R²: {resultado[1]:.4f} | RMSE: {resultado[2]} | MAE: {resultado[3]}")
+        print("Execute com: streamlit run codigo_riqueza_melhorado.py")
