@@ -136,7 +136,31 @@ def treinar_modelo_xgboost(df_model):
     _cached_model = model
     _cached_r2 = r2
     _cached_importance = importance
-    
+    from sklearn.linear_model import LinearRegression, Ridge, Lasso
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+
+def comparar_modelos_basicos(X, y):
+    modelos = {
+        "Regressão Linear (OLS)": LinearRegression(),
+        "Ridge": Ridge(alpha=1.0),
+        "Lasso": Lasso(alpha=0.1),
+        "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
+        "XGBoost": XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42)
+    }
+
+    resultados = []
+
+    for nome, modelo in modelos.items():
+        modelo.fit(X, y)
+        y_pred = modelo.predict(X)
+        r2 = r2_score(y, y_pred)
+        rmse = mean_squared_error(y, y_pred, squared=False)
+        mae = mean_absolute_error(y, y_pred)
+        resultados.append([nome, round(r2, 4), round(rmse, 2), round(mae, 2)])
+
+    return resultados
+
     return model, r2, importance
 
 def gerar_projecao_dinamica(df_model, pais, modelo, ano_final=2035):
