@@ -135,7 +135,7 @@ def treinar_todos_modelos(df_model):
         y_pred = modelo.predict(X)
         
         r2 = r2_score(y, y_pred)
-        rmse = mean_squared_error(y, y_pred, squared=False)
+        rmse = np.sqrt(mean_squared_error(y, y_pred))  # Calcular RMSE manualmente
         mae = mean_absolute_error(y, y_pred)
         
         resultados.append({
@@ -222,6 +222,9 @@ def gerar_projecao_realista(df_model, pais, modelo, ano_final=2035):
     ultima_linha = df_pred.iloc[-1].copy()
     novas_linhas = []
     
+    # Seed para reproducibilidade
+    np.random.seed(42)
+    
     for i, ano in enumerate(anos_futuros):
         nova_linha = ultima_linha.copy()
         nova_linha['Ano'] = int(ano)
@@ -269,24 +272,31 @@ def gerar_projecao_realista(df_model, pais, modelo, ano_final=2035):
         try:
             colunas_lag = [c for c in nova_linha.index if c.endswith('_lag1')]
             X_input = nova_linha[colunas_lag].values.reshape(1, -1)
-            pib_modelo = modelo.predict(X_input)[0]
             
-            # Combinar previsão do modelo com tendência histórica
-            pib_anterior = ultima_linha['PIB_per_capita']
-            pib_tendencia = pib_anterior * (1 + crescimento_medio)
-            
-            # Média ponderada: 60% modelo, 40% tendência histórica
-            peso_modelo = 0.6 * (0.95 ** i)  # Peso do modelo diminui com o tempo
-            peso_tendencia = 1 - peso_modelo
-            
-            pib_combinado = (pib_modelo * peso_modelo) + (pib_tendencia * peso_tendencia)
-            
-            # Limitar crescimento anual a ±8%
-            crescimento_anual = (pib_combinado / pib_anterior) - 1
-            crescimento_anual = max(-0.08, min(0.08, crescimento_anual))
-            
-            pib_final = pib_anterior * (1 + crescimento_anual)
-            nova_linha['PIB_per_capita'] = pib_final
+            # Verificar se todas as features estão presentes
+            if len(X_input[0]) == len(colunas_lag):
+                pib_modelo = modelo.predict(X_input)[0]
+                
+                # Combinar previsão do modelo com tendência histórica
+                pib_anterior = ultima_linha['PIB_per_capita']
+                pib_tendencia = pib_anterior * (1 + crescimento_medio)
+                
+                # Média ponderada: 60% modelo, 40% tendência histórica
+                peso_modelo = 0.6 * (0.95 ** i)  # Peso do modelo diminui com o tempo
+                peso_tendencia = 1 - peso_modelo
+                
+                pib_combinado = (pib_modelo * peso_modelo) + (pib_tendencia * peso_tendencia)
+                
+                # Limitar crescimento anual a ±8%
+                crescimento_anual = (pib_combinado / pib_anterior) - 1
+                crescimento_anual = max(-0.08, min(0.08, crescimento_anual))
+                
+                pib_final = pib_anterior * (1 + crescimento_anual)
+                nova_linha['PIB_per_capita'] = pib_final
+            else:
+                # Fallback se houver problema com as features
+                crescimento_fallback = max(-0.02, min(0.03, crescimento_medio))
+                nova_linha['PIB_per_capita'] = ultima_linha['PIB_per_capita'] * (1 + crescimento_fallback)
             
         except Exception as e:
             # Fallback mais conservador
@@ -319,24 +329,29 @@ def gerar_cenarios_realistas(df_model, pais, modelo, ano_final=2035):
     cenarios['Realista'] = df_realista
     
     ultimo_ano_real = int(df_model.reset_index()['Ano'].max())
-    mask_futuro = df_realista['Ano'] > ultimo_ano_real
     
     # Cenário otimista (+1% adicional por ano, mais conservador)
     np.random.seed(123)
     df_otimista = gerar_projecao_realista(df_model, pais, modelo, ano_final)
+    mask_futuro = df_otimista['Ano'] > ultimo_ano_real
     if mask_futuro.any():
         anos_futuros = df_otimista.loc[mask_futuro, 'Ano'] - ultimo_ano_real
-        multiplicador_otimista = (1.01 ** anos_futuros.values.reshape(-1, 1))
-        df_otimista.loc[mask_futuro, 'PIB_per_capita'] *= multiplicador_otimista.flatten()
+        # Aplicar multiplicador gradual
+        for idx, ano_futuro in enumerate(anos_futuros):
+            multiplicador = 1.01 ** ano_futuro
+            df_otimista.loc[df_otimista['Ano'] == df_otimista.loc[mask_futuro, 'Ano'].iloc[idx], 'PIB_per_capita'] *= multiplicador
     cenarios['Otimista'] = df_otimista
     
     # Cenário pessimista (-1% por ano, mais conservador)
     np.random.seed(456)
     df_pessimista = gerar_projecao_realista(df_model, pais, modelo, ano_final)
+    mask_futuro = df_pessimista['Ano'] > ultimo_ano_real
     if mask_futuro.any():
         anos_futuros = df_pessimista.loc[mask_futuro, 'Ano'] - ultimo_ano_real
-        multiplicador_pessimista = (0.99 ** anos_futuros.values.reshape(-1, 1))
-        df_pessimista.loc[mask_futuro, 'PIB_per_capita'] *= multiplicador_pessimista.flatten()
+        # Aplicar multiplicador gradual
+        for idx, ano_futuro in enumerate(anos_futuros):
+            multiplicador = 0.99 ** ano_futuro
+            df_pessimista.loc[df_pessimista['Ano'] == df_pessimista.loc[mask_futuro, 'Ano'].iloc[idx], 'PIB_per_capita'] *= multiplicador
     cenarios['Pessimista'] = df_pessimista
     
     return cenarios
