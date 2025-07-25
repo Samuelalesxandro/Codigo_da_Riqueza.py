@@ -910,3 +910,12 @@ else:
     except Exception as e:
         print(f"❌ Erro na execução: {e}")
         print("Execute com: streamlit run codigo_riqueza_final.py")
+TARGET = 'PIB_per_capita'
+PREDICTORS = [col for col in df_model.columns if '_lag1' in col]
+X = df_model[PREDICTORS]
+y = df_model[TARGET]
+
+resultados_modelos = comparar_modelos_basicos(X, y)
+
+for resultado in resultados_modelos:
+    print(f"{resultado[0]:<25} | R²: {resultado[1]:.4f} | RMSE: {resultado[2]} | MAE: {resultado[3]}")
