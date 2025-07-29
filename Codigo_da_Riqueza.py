@@ -41,7 +41,7 @@ PAISES_SUL_AMERICA = ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'P
 PAISES_SUDESTE_ASIATICO = ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN']
 TODOS_PAISES = list(set(PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + BRICS + ZONA_DO_EURO))
 DATA_INICIO = datetime(1995, 1, 1)
-DATA_FIM = datetime(2025, 4, 30)
+DATA_FIM = datetime(2025, 6, 30)
 
 # Variáveis globais para cache manual
 _cached_data = None
