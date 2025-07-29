@@ -6,3 +6,12 @@ scikit-learn
 streamlit
 wbdata
 openpyxl
+pandas
+wbdata
+matplotlib
+seaborn
+xgboost
+scikit-learn
+numpy
+streamlit
+shap
