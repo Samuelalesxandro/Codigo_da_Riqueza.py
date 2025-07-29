@@ -31,11 +31,8 @@ INDICADORES = {
     "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel",
     "FP.CPI.TOTL.ZG": "Inflacao_Anual_Consumidor",
     "BX.KLT.DINV.CD.WD": "Investimento_Estrangeiro_Direto",
-    "SP.DYN.LE00.IN": "Expectativa_de_Vida",
     "SE.XPD.TOTL.GD.ZS": "Gastos_Governamentais_Educacao",
-    "GC.DOD.TOTL.GD.ZS": "Divida_Governo_Central_perc_PIB",
     "IQ.CPA.BREG.XQ": "Qualidade_Regulatoria",
-    "MS.MIL.XPND.GD.ZS": "Gastos_Militares_perc_PIB",
     "TX.VAL.TECH.MF.ZS": "Exportacoes_Alta_Tecnologia_perc"
     
 }
