@@ -16,10 +16,11 @@ warnings.filterwarnings('ignore')
 
 # --- CONFIGURAÇÃO DO PROJETO ---
 INDICADORES = {
-       "NY.GDP.PCAP.KD": "PIB_per_capita",
-    "NE.GDI.FTOT.CD": "Formacao_Bruta_Capital",
+    "NY.GDP.PCAP.KD": "PIB_per_capita",
+    "NE.GDI.FTOT.CD": "Formacao_Bruta_Capital", 
     "SE.ADT.1524.LT.ZS": "Alfabetizacao_Jovens",
     "SL.TLF.CACT.ZS": "Participacao_Forca_Trabalho",
+    "NE.RSB.GNFS.CD": "Balanca_Comercial",
     "IT.NET.USER.ZS": "Cobertura_Internet",
     "NE.EXP.GNFS.CD": "Valor_Exportacoes",
     "NY.GNP.PCAP.CD": "Renda_Nacional_Bruta_per_Capita",
@@ -28,11 +29,8 @@ INDICADORES = {
     "SL.UEM.TOTL.ZS": "Desemprego",
     "SE.PRM.CMPT.ZS": "Conclusao_Ensino_Primario",
     "NE.CON.PRVT.CD": "Consumo_Familias",
-    "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel",
-    "FP.CPI.TOTL.ZG": "Inflacao_Anual_Consumidor",
-    "BX.KLT.DINV.CD.WD": "Investimento_Estrangeiro_Direto",
-    "SE.XPD.TOTL.GD.ZS": "Gastos_Governamentais_Educacao"
-    
+    "NE.CON.GOVT.CD": "Consumo_Governo",
+    "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel"
 }
 
 ZONA_DO_EURO = ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', 'BEL']
@@ -41,7 +39,7 @@ PAISES_SUL_AMERICA = ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'P
 PAISES_SUDESTE_ASIATICO = ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN']
 TODOS_PAISES = list(set(PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + BRICS + ZONA_DO_EURO))
 DATA_INICIO = datetime(1995, 1, 1)
-DATA_FIM = datetime(2025, 6, 30)
+DATA_FIM = datetime(2025, 4, 30)
 
 # Variáveis globais para cache manual
 _cached_data = None
