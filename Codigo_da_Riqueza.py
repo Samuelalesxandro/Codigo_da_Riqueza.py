@@ -26,10 +26,10 @@ INDICADORES = {
     "NY.GNP.PCAP.CD": "Renda_Nacional_Bruta_per_Capita",
     "NE.EXP.GNFS.CD": "Valor_Exportacoes",
     "NE.CON.PRVT.CD": "Consumo_Familias",
-    "BX.KLT.DINV.CD.WD": "Investimento_Estrangeiro_Direto"
+    "BX.KLT.DINV.CD.WD": "Investimento_Estrangeiro_Direto",
     
     # Indicadores de Capital Humano
-    "SE.ADT.1524.LT.ZS": "Alfabetizacao_Jovens"
+    "SE.ADT.1524.LT.ZS": "Alfabetizacao_Jovens",
     
     # Indicadores de Trabalho e Produtividade
     "SL.TLF.CACT.ZS": "Participacao_Forca_Trabalho",
@@ -37,10 +37,10 @@ INDICADORES = {
     
     # Indicadores de Infraestrutura e Tecnologia
     "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel",
-    "TX.VAL.TECH.MF.ZS": "Exportacoes_Alta_Tecnologia_perc"
+    "TX.VAL.TECH.MF.ZS": "Exportacoes_Alta_Tecnologia_perc",
     
     # Indicadores de Governança e Distribuição
-    "SI.POV.GINI": "Gini",
+    "SI.POV.GINI": "Gini"
    
 }
 
