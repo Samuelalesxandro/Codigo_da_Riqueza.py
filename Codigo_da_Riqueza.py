@@ -202,18 +202,12 @@ class DataProcessor:
         """Padroniza nomes das colunas"""
         df = df.copy()
         
-        # Debug: mostrar colunas originais
-        st.info(f"🔍 Colunas originais: {list(df.columns)}")
-        
         # Renomear colunas do índice
         if 'country' in df.columns:
             df.rename(columns={'country': 'País'}, inplace=True)
         if 'date' in df.columns:
             df.rename(columns={'date': 'Ano'}, inplace=True)
             df['Ano'] = pd.to_numeric(df['Ano'], errors='coerce')
-        
-        # Debug: mostrar colunas após padronização
-        st.info(f"🔍 Colunas padronizadas: {list(df.columns)}")
         
         return df
     
@@ -240,6 +234,7 @@ class DataProcessor:
         
         def process_country_group(group):
             """Processa um país específico com múltiplas estratégias"""
+            group = group.copy()  # Evitar SettingWithCopyWarning
             country_data = group.set_index('Ano')[indicadores]
             
             # 1. Interpolação linear (melhor para séries temporais)
@@ -259,13 +254,17 @@ class DataProcessor:
                     except:
                         pass
             
-            return country_data.reset_index()
+            result = country_data.reset_index()
+            result['País'] = group['País'].iloc[0]  # Adicionar país de volta
+            return result
         
         # Aplicar processamento por país
-        df_processed = df.groupby('País', group_keys=False).apply(process_country_group)
+        df_processed_list = []
+        for pais, group in df.groupby('País'):
+            processed_group = process_country_group(group)
+            df_processed_list.append(processed_group)
         
-        # Adicionar coluna País de volta
-        df_processed['País'] = df.groupby('País')['País'].first().repeat(df.groupby('País').size()).values
+        df_processed = pd.concat(df_processed_list, ignore_index=True)
         
         # Como último recurso, preenchimento com mediana regional
         df_processed = self._fill_with_regional_median(df_processed)
@@ -276,7 +275,7 @@ class DataProcessor:
         return df_processed
     
     def _fill_with_regional_median(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Preenche dados faltantes com mediana regional"""
+        """Preenche dados faltantes com mediana regional - VERSÃO CORRIGIDA"""
         df = df.copy()
         
         # Mapeamento de países para regiões
@@ -295,25 +294,53 @@ class DataProcessor:
         numeric_cols = [col for col in df.columns if col not in ['País', 'Ano', 'Região']]
         
         for col in numeric_cols:
-            # Calcular mediana por região e ano
-            median_by_region_year = df.groupby(['Região', 'Ano'])[col].median()
-            
-            # Preencher valores faltantes
-            mask = df[col].isnull()
-            for idx in df[mask].index:
-                region = df.loc[idx, 'Região']
-                year = df.loc[idx, 'Ano']
+            # Verificar se há valores faltantes nesta coluna
+            if df[col].isnull().sum() == 0:
+                continue
                 
-                if (region, year) in median_by_region_year:
-                    df.loc[idx, col] = median_by_region_year[(region, year)]
-                else:
-                    # Fallback: mediana global da região
-                    regional_median = df[df['Região'] == region][col].median()
-                    if not pd.isna(regional_median):
-                        df.loc[idx, col] = regional_median
-                    else:
-                        # Último recurso: mediana global
-                        df.loc[idx, col] = df[col].median()
+            # Calcular mediana por região e ano - CORRIGIDO
+            try:
+                # Agrupar e calcular mediana de forma mais robusta
+                regional_medians = df.groupby(['Região', 'Ano'])[col].median()
+                
+                # Preencher valores faltantes
+                mask = df[col].isnull()
+                
+                for idx in df[mask].index:
+                    region = df.loc[idx, 'Região']
+                    year = df.loc[idx, 'Ano']
+                    
+                    # Tentar usar mediana regional por ano
+                    try:
+                        if pd.notna(regional_medians.loc[(region, year)]):
+                            df.loc[idx, col] = regional_medians.loc[(region, year)]
+                            continue
+                    except (KeyError, TypeError):
+                        pass
+                    
+                    # Fallback: mediana regional geral
+                    try:
+                        regional_median = df[df['Região'] == region][col].median()
+                        if pd.notna(regional_median):
+                            df.loc[idx, col] = regional_median
+                            continue
+                    except:
+                        pass
+                    
+                    # Último recurso: mediana global
+                    try:
+                        global_median = df[col].median()
+                        if pd.notna(global_median):
+                            df.loc[idx, col] = global_median
+                        else:
+                            df.loc[idx, col] = 0
+                    except:
+                        df.loc[idx, col] = 0
+                        
+            except Exception as e:
+                st.warning(f"⚠️ Erro ao processar coluna {col}: {e}")
+                # Como fallback final, preencher com mediana global ou zero
+                df[col].fillna(df[col].median() if pd.notna(df[col].median()) else 0, inplace=True)
         
         df.drop(columns=['Região'], inplace=True)
         
@@ -343,34 +370,39 @@ class DataProcessor:
     
     def _prepare_for_modeling(self, df: pd.DataFrame) -> pd.DataFrame:
         """Prepara dados para modelagem com engenharia de features"""
-        df_model = df.copy().set_index(['País', 'Ano'])
-        
-        # Remover PIB per capita dos preditores
-        if 'PIB_per_capita' in df_model.columns:
-            target = df_model['PIB_per_capita']
-            predictors_df = df_model.drop(columns=['PIB_per_capita'])
-        else:
-            st.error("❌ PIB_per_capita não encontrado!")
+        try:
+            df_model = df.copy().set_index(['País', 'Ano'])
+            
+            # Remover PIB per capita dos preditores
+            if 'PIB_per_capita' in df_model.columns:
+                target = df_model['PIB_per_capita']
+                predictors_df = df_model.drop(columns=['PIB_per_capita'])
+            else:
+                st.error("❌ PIB_per_capita não encontrado!")
+                return None
+            
+            # Criar variáveis lag
+            for var in predictors_df.columns:
+                df_model[f'{var}_lag1'] = predictors_df.groupby('País')[var].shift(1)
+                # Lag de 2 anos para algumas variáveis importantes
+                if var in ['Formacao_Bruta_Capital', 'Alfabetizacao_Jovens', 'Cobertura_Internet']:
+                    df_model[f'{var}_lag2'] = predictors_df.groupby('País')[var].shift(2)
+            
+            # Criar variáveis de crescimento
+            for var in ['Formacao_Bruta_Capital', 'Valor_Exportacoes', 'Consumo_Familias']:
+                if var in predictors_df.columns:
+                    growth_var = f'{var}_growth'
+                    df_model[growth_var] = predictors_df.groupby('País')[var].pct_change()
+                    df_model[f'{growth_var}_lag1'] = df_model.groupby('País')[growth_var].shift(1)
+            
+            # Remover linhas com NaN após criar lags
+            df_model_clean = df_model.dropna()
+            
+            return df_model_clean
+            
+        except Exception as e:
+            st.error(f"❌ Erro na preparação dos dados para modelagem: {e}")
             return None
-        
-        # Criar variáveis lag
-        for var in predictors_df.columns:
-            df_model[f'{var}_lag1'] = predictors_df.groupby('País')[var].shift(1)
-            # Lag de 2 anos para algumas variáveis importantes
-            if var in ['Formacao_Bruta_Capital', 'Alfabetizacao_Jovens', 'Cobertura_Internet']:
-                df_model[f'{var}_lag2'] = predictors_df.groupby('País')[var].shift(2)
-        
-        # Criar variáveis de crescimento
-        for var in ['Formacao_Bruta_Capital', 'Valor_Exportacoes', 'Consumo_Familias']:
-            if var in predictors_df.columns:
-                growth_var = f'{var}_growth'
-                df_model[growth_var] = predictors_df.groupby('País')[var].pct_change()
-                df_model[f'{growth_var}_lag1'] = df_model.groupby('País')[growth_var].shift(1)
-        
-        # Remover linhas com NaN após criar lags
-        df_model_clean = df_model.dropna()
-        
-        return df_model_clean
     
     def get_quality_report(self) -> Dict:
         """Retorna relatório de qualidade dos dados"""
@@ -728,21 +760,35 @@ def main():
         # Interpretação contextualizada
         if model_info['R²'] >= 0.8:
             performance_level = "Excelente"
-            performance_color = "success"
         elif model_info['R²'] >= 0.6:
             performance_level = "Bom"
-            performance_color = "info"
         else:
             performance_level = "Limitado"
-            performance_color = "warning"
         
-        getattr(st, performance_level.lower() if performance_level != "Limitado" else "warning")(f"""
-        **Performance: {performance_level}**
-        
-        Este modelo tem poder explicativo **{performance_level.lower()}** para prever o PIB per capita.
-        Com erro médio de ${model_info['MAE']:,.0f}, as projeções têm precisão de 
-        ±{model_info['MAPE']:.1f}% em média.
-        """)
+        if performance_level == "Excelente":
+            st.success(f"""
+            **Performance: {performance_level}**
+            
+            Este modelo tem poder explicativo **{performance_level.lower()}** para prever o PIB per capita.
+            Com erro médio de ${model_info['MAE']:,.0f}, as projeções têm precisão de 
+            ±{model_info['MAPE']:.1f}% em média.
+            """)
+        elif performance_level == "Bom":
+            st.info(f"""
+            **Performance: {performance_level}**
+            
+            Este modelo tem poder explicativo **{performance_level.lower()}** para prever o PIB per capita.
+            Com erro médio de ${model_info['MAE']:,.0f}, as projeções têm precisão de 
+            ±{model_info['MAPE']:.1f}% em média.
+            """)
+        else:
+            st.warning(f"""
+            **Performance: {performance_level}**
+            
+            Este modelo tem poder explicativo **{performance_level.lower()}** para prever o PIB per capita.
+            Com erro médio de ${model_info['MAE']:,.0f}, as projeções têm precisão de 
+            ±{model_info['MAPE']:.1f}% em média.
+            """)
         
         # Informações do dataset
         st.info(f"""
@@ -773,7 +819,7 @@ def main():
             "Período histórico:",
             options=available_years,
             value=(available_years[0], available_years[-1]),
-            help="Defini o intervalo de anos para análise histórica"
+            help="Define o intervalo de anos para análise histórica"
         )
     else:
         year_start = year_end = available_years[0]
