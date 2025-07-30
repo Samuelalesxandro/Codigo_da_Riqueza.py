@@ -304,8 +304,8 @@ class DataProcessor:
                 region = df.loc[idx, 'Região']
                 year = df.loc[idx, 'Ano']
                 
-                if (region, year) in median_by_region_year:
-                    df.loc[idx, col] = median_by_region_year[(region, year)]
+                if (region, year) in median_by_region_year.index:
+                    df.at[idx, col] = median_by_region_year[(region, year)]
                 else:
                     # Fallback: mediana global da região
                     regional_median = df[df['Região'] == region][col].median()
