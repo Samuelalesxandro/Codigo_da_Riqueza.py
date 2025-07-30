@@ -26,30 +26,22 @@ INDICADORES = {
     "NY.GNP.PCAP.CD": "Renda_Nacional_Bruta_per_Capita",
     "NE.EXP.GNFS.CD": "Valor_Exportacoes",
     "NE.CON.PRVT.CD": "Consumo_Familias",
-    "BX.KLT.DINV.CD.WD": "Investimento_Estrangeiro_Direto",
-    "FP.CPI.TOTL.ZG": "Inflacao_Anual_Consumidor",
-    "GC.DOD.TOTL.GD.ZS": "Divida_Governo_Central_perc_PIB",
+    "BX.KLT.DINV.CD.WD": "Investimento_Estrangeiro_Direto"
     
     # Indicadores de Capital Humano
-    "SE.ADT.1524.LT.ZS": "Alfabetizacao_Jovens",
-    "SE.PRM.CMPT.ZS": "Conclusao_Ensino_Primario",
-    "SE.XPD.TOTL.GD.ZS": "Gastos_Governamentais_Educacao",
-    "SP.DYN.LE00.IN": "Expectativa_de_Vida",
+    "SE.ADT.1524.LT.ZS": "Alfabetizacao_Jovens"
     
     # Indicadores de Trabalho e Produtividade
     "SL.TLF.CACT.ZS": "Participacao_Forca_Trabalho",
     "SL.UEM.TOTL.ZS": "Desemprego",
     
     # Indicadores de Infraestrutura e Tecnologia
-    "IT.NET.USER.ZS": "Cobertura_Internet",
-    "EG.ELC.ACCS.ZS": "Acesso_Eletricidade",
     "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel",
-    "TX.VAL.TECH.MF.ZS": "Exportacoes_Alta_Tecnologia_perc",
+    "TX.VAL.TECH.MF.ZS": "Exportacoes_Alta_Tecnologia_perc"
     
     # Indicadores de Governança e Distribuição
     "SI.POV.GINI": "Gini",
-    "IQ.CPA.BREG.XQ": "Qualidade_Regulatoria",
-    "MS.MIL.XPND.GD.ZS": "Gastos_Militares_perc_PIB"
+   
 }
 
 # Grupos de países para análise comparativa
