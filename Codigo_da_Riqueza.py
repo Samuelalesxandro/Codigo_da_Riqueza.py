@@ -578,57 +578,52 @@ class EconomicProjectionSystem:
             options=available_countries,
             index=available_countries.index('BRA') if 'BRA' in available_countries else 0
         )
+        
+        # Obter dados mais recentes do país selecionado
+        latest_data = self._get_latest_country_data(selected_country)
+        
+        if latest_data is None:
+            st.error(f"❌ Dados insuficientes para {selected_country}")
+            return
+        
+        # Configuração de cenários
+        st.subheader("⚙️ Configuração de Cenários")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Selecionar modelo para projeção
+            model_options = self.models_results['Modelo'].tolist()
+            selected_model = st.selectbox(
+                "Modelo para projeção:",
+                options=model_options,
+                index=0
+            )
             
-    # Obter dados mais recentes do país selecionado
-    latest_data = self._get_latest_country_data(selected_country)
-    
-    if latest_data is None:
-        st.error(f"❌ Dados insuficientes para {selected_country}")
-        return
-    
-    # Configuração de cenários
-    st.subheader("⚙️ Configuração de Cenários")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Selecionar modelo para projeção
-        model_options = self.models_results['Modelo'].tolist()
-        selected_model = st.selectbox(
-            "Modelo para projeção:",
-            options=model_options,
-            index=0
-        )
+            # Número de anos para projetar
+            projection_years = st.slider(
+                "Anos para projetar:",
+                min_value=1,
+                max_value=10,
+                value=5
+            )
         
-        # Número de anos para projetar
-        projection_years = st.slider(
-            "Anos para projetar:",
-            min_value=1,
-            max_value=10,
-            value=5
-        )
-    
-    with col2:
-        # Selecionar variáveis para cenário personalizado
-        st.write("**Variáveis para ajuste:**")
-        
-        # Definir valores padrão que existem nas opções
-        default_vars = []
-        possible_defaults = ['Formacao_Bruta_Capital', 'Cobertura_Internet']
-        
-        for var in possible_defaults:
-            if var in self.base_indicators:
-                default_vars.append(var)
-        
-        # Se nenhum padrão válido, usar o primeiro indicador disponível
-        if not default_vars and self.base_indicators:
-            default_vars = [self.base_indicators[0]]
+        with col2:
+            # Selecionar variáveis para cenário personalizado
+            st.write("**Variáveis para ajuste:**")
             
-        scenario_vars = st.multiselect(
-            "Selecione variáveis para cenário personalizado:",
-            options=self.base_indicators,
-            default=default_vars
-        )
+            # Verificar quais valores padrão existem nas opções
+            available_defaults = [var for var in ['Formacao_Bruta_Capital', 'Cobertura_Internet'] 
+                                if var in self.base_indicators]
+            
+            # Se nenhum padrão estiver disponível, usar lista vazia
+            default_values = available_defaults if available_defaults else []
+            
+            scenario_vars = st.multiselect(
+                "Selecione variáveis para cenário personalizado:",
+                options=self.base_indicators,
+                default=default_values
+            )
     
         
         # Criar diferentes cenários
