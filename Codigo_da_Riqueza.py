@@ -543,59 +543,73 @@ class EconomicProjectionSystem:
         return base_indicators
 
     def create_projection_interface(self):
-        """Cria interface Streamlit para projeções econômicas"""
-        st.header("🔮 Projeções Econômicas - Cenários Futuros")
-        
-        # Verificar se temos os dados necessários
-        if not hasattr(self, 'df_model') or not hasattr(self, 'trained_models'):
-            st.warning("⚠️ Dados necessários não disponíveis para projeções")
-            return
-        
-        # Selecionar país para projeção
-        available_countries = sorted(self.df_model.reset_index()['País'].unique())
-        selected_country = st.selectbox(
-            "Selecione o país para projeção:",
-            options=available_countries,
-            index=available_countries.index('BRA') if 'BRA' in available_countries else 0
+    """Cria interface Streamlit para projeções econômicas"""
+    st.header("🔮 Projeções Econômicas - Cenários Futuros")
+    
+    # Verificar se temos os dados necessários
+    if not hasattr(self, 'df_model') or not hasattr(self, 'trained_models'):
+        st.warning("⚠️ Dados necessários não disponíveis para projeções")
+        return
+    
+    # Selecionar país para projeção
+    available_countries = sorted(self.df_model.reset_index()['País'].unique())
+    selected_country = st.selectbox(
+        "Selecione o país para projeção:",
+        options=available_countries,
+        index=available_countries.index('BRA') if 'BRA' in available_countries else 0
+    )
+    
+    # Obter dados mais recentes do país selecionado
+    latest_data = self._get_latest_country_data(selected_country)
+    
+    if latest_data is None:
+        st.error(f"❌ Dados insuficientes para {selected_country}")
+        return
+    
+    # Configuração de cenários
+    st.subheader("⚙️ Configuração de Cenários")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Selecionar modelo para projeção
+        model_options = self.models_results['Modelo'].tolist()
+        selected_model = st.selectbox(
+            "Modelo para projeção:",
+            options=model_options,
+            index=0
         )
         
-        # Obter dados mais recentes do país selecionado
-        latest_data = self._get_latest_country_data(selected_country)
+        # Número de anos para projetar
+        projection_years = st.slider(
+            "Anos para projetar:",
+            min_value=1,
+            max_value=10,
+            value=5
+        )
+    
+    with col2:
+        # Selecionar variáveis para cenário personalizado
+        st.write("**Variáveis para ajuste:**")
         
-        if latest_data is None:
-            st.error(f"❌ Dados insuficientes para {selected_country}")
-            return
+        # Definir valores padrão que existem nas opções
+        default_vars = []
+        possible_defaults = ['Formacao_Bruta_Capital', 'Cobertura_Internet']
         
-        # Configuração de cenários
-        st.subheader("⚙️ Configuração de Cenários")
+        for var in possible_defaults:
+            if var in self.base_indicators:
+                default_vars.append(var)
         
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Selecionar modelo para projeção
-            model_options = self.models_results['Modelo'].tolist()
-            selected_model = st.selectbox(
-                "Modelo para projeção:",
-                options=model_options,
-                index=0
-            )
+        # Se nenhum padrão válido, usar o primeiro indicador disponível
+        if not default_vars and self.base_indicators:
+            default_vars = [self.base_indicators[0]]
             
-            # Número de anos para projetar
-            projection_years = st.slider(
-                "Anos para projetar:",
-                min_value=1,
-                max_value=10,
-                value=5
-            )
-        
-        with col2:
-            # Selecionar variáveis para cenário personalizado
-            st.write("**Variáveis para ajuste:**")
-            scenario_vars = st.multiselect(
-                "Selecione variáveis para cenário personalizado:",
-                options=self.base_indicators,
-                default=['Formacao_Bruta_Capital', 'Cobertura_Internet']
-            )
+        scenario_vars = st.multiselect(
+            "Selecione variáveis para cenário personalizado:",
+            options=self.base_indicators,
+            default=default_vars
+        )
+    
         
         # Criar diferentes cenários
         st.subheader("🌐 Configurar Cenários")
