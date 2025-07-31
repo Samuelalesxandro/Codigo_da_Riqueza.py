@@ -542,7 +542,7 @@ class EconomicProjectionSystem:
                 base_indicators.append(base_name)
         return base_indicators
 
-    class EconomicProjectionSystem:
+   class EconomicProjectionSystem:
     """Sistema avançado de projeções econômicas com múltiplos cenários"""
     
     def __init__(self, df_model: pd.DataFrame, trained_models: Dict, models_results: pd.DataFrame):
@@ -566,60 +566,30 @@ class EconomicProjectionSystem:
         """Cria interface Streamlit para projeções econômicas"""
         st.header("🔮 Projeções Econômicas - Cenários Futuros")
         
-        # Verificar dados disponíveis
-        if not hasattr(self, 'df_model') or not hasattr(self, 'trained_models'):
-            st.warning("⚠️ Dados necessários não disponíveis para projeções")
+        # Verificação segura de dados
+        if not hasattr(self, 'df_model'):
+            st.error("Dados do modelo não disponíveis")
             return
+            
+        # Debug: mostrar indicadores disponíveis
+        st.write("Indicadores disponíveis:", self.base_indicators)
         
-        # Seleção de país
-        available_countries = sorted(self.df_model.reset_index()['País'].unique())
-        selected_country = st.selectbox(
-            "Selecione o país para projeção:",
-            options=available_countries,
-            index=available_countries.index('BRA') if 'BRA' in available_countries else 0
+        # Configuração segura do multiselect
+        safe_defaults = [var for var in ['Formacao_Bruta_Capital', 'Cobertura_Internet'] 
+                       if var in self.base_indicators]
+        
+        if not safe_defaults and self.base_indicators:
+            safe_defaults = [self.base_indicators[0]]
+            
+        scenario_vars = st.multiselect(
+            "Selecione variáveis:",
+            options=self.base_indicators,
+            default=safe_defaults
         )
-        
-        # Configuração de cenários
-        st.subheader("⚙️ Configuração de Cenários")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            model_options = self.models_results['Modelo'].tolist()
-            selected_model = st.selectbox(
-                "Modelo para projeção:",
-                options=model_options,
-                index=0
-            )
-            
-            projection_years = st.slider(
-                "Anos para projetar:",
-                min_value=1,
-                max_value=10,
-                value=5
-            )
-        
-        with col2:
-            st.write("**Variáveis para ajuste:**")
-            
-            # Verificação segura dos valores padrão
-            safe_defaults = []
-            possible_defaults = ['Formacao_Bruta_Capital', 'Cobertura_Internet']
-            
-            for var in possible_defaults:
-                if var in self.base_indicators:
-                    safe_defaults.append(var)
-            
-            # Garante que pelo menos um padrão válido existe
-            if not safe_defaults and self.base_indicators:
-                safe_defaults = [self.base_indicators[0]]
-            
-            scenario_vars = st.multiselect(
-                "Selecione variáveis para cenário personalizado:",
-                options=self.base_indicators,
-                default=safe_defaults
-            )
-        
-        # Resto da implementação...
+      # Teste de verificação
+if __name__ == '__main__':
+    print("Classe EconomicProjectionSystem carregada com sucesso!")  
+        # Restante da implementação...
     
         
         # Criar diferentes cenários
