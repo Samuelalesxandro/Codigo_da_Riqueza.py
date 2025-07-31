@@ -509,40 +509,7 @@ class ModelTrainer:
         
         return _cached_models
 
-# --- APLICAÇÃO STREAMLIT PRINCIPAL ---
-
-
-
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import streamlit as st
-from typing import Dict, List, Tuple, Optional
-import warnings
-warnings.filterwarnings('ignore')
-
 class EconomicProjectionSystem:
-    """Sistema avançado de projeções econômicas com múltiplos cenários"""
-    
-    def __init__(self, df_model: pd.DataFrame, trained_models: Dict, models_results: pd.DataFrame):
-        self.df_model = df_model
-        self.trained_models = trained_models
-        self.models_results = models_results
-        self.base_indicators = self._get_base_indicators()
-        
-    def _get_base_indicators(self) -> List[str]:
-        """Identifica indicadores base (sem lag/growth)"""
-        all_cols = [col for col in self.df_model.columns if col != 'PIB_per_capita']
-        base_indicators = []
-        
-        for col in all_cols:
-            base_name = col.replace('_lag1', '').replace('_lag2', '').replace('_growth_lag1', '').replace('_growth', '')
-            if base_name not in base_indicators and base_name in self.df_model.columns:
-                base_indicators.append(base_name)
-        return base_indicators
-
-   class EconomicProjectionSystem:
     """Sistema avançado de projeções econômicas com múltiplos cenários"""
     
     def __init__(self, df_model: pd.DataFrame, trained_models: Dict, models_results: pd.DataFrame):
@@ -567,34 +534,87 @@ class EconomicProjectionSystem:
         st.header("🔮 Projeções Econômicas - Cenários Futuros")
         
         # Verificação segura de dados
-        if not hasattr(self, 'df_model'):
-            st.error("Dados do modelo não disponíveis")
+        if not hasattr(self, 'df_model') or self.df_model is None:
+            st.error("❌ Dados do modelo não disponíveis")
+            return
+        
+        if not hasattr(self, 'trained_models') or 'modelos' not in self.trained_models:
+            st.error("❌ Modelos treinados não disponíveis")
             return
             
-        # Configuração segura do multiselect
-        safe_defaults = []
-        possible_defaults = ['Formacao_Bruta_Capital', 'Cobertura_Internet']
+        # Interface de seleção de país
+        col1, col2, col3 = st.columns(3)
         
-        for var in possible_defaults:
+        with col1:
+            # Obter países disponíveis
+            try:
+                available_countries = sorted(self.df_model.reset_index()['País'].unique())
+                selected_country = st.selectbox(
+                    "Selecione o país:",
+                    options=available_countries,
+                    index=0 if available_countries else None,
+                    help="Escolha o país para análise de projeção"
+                )
+            except Exception as e:
+                st.error(f"❌ Erro ao obter países: {e}")
+                return
+        
+        with col2:
+            # Seleção do modelo
+            model_names = list(self.trained_models['modelos'].keys())
+            selected_model = st.selectbox(
+                "Modelo:",
+                options=model_names,
+                index=0,
+                help="Modelo para gerar as projeções"
+            )
+        
+        with col3:
+            # Anos para projeção
+            projection_years = st.slider(
+                "Anos para projetar:",
+                min_value=1,
+                max_value=10,
+                value=5,
+                help="Número de anos futuros para projeção"
+            )
+        
+        # Obter dados mais recentes do país selecionado
+        try:
+            latest_data = self._get_latest_country_data(selected_country)
+            
+            if latest_data is None:
+                st.error(f"❌ Não foi possível obter dados para {selected_country}")
+                return
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao obter dados do país: {e}")
+            return
+        
+        # Debug: mostrar indicadores disponíveis apenas no modo debug
+        if st.checkbox("🔧 Modo Debug (mostrar indicadores)"):
+            st.write("**Indicadores base disponíveis:**", self.base_indicators)
+            st.write("**Dados mais recentes:**", latest_data)
+        
+        # Configuração de cenário com indicadores seguros
+        safe_defaults = []
+        for var in ['Formacao_Bruta_Capital', 'Cobertura_Internet', 'Alfabetizacao_Jovens']:
             if var in self.base_indicators:
                 safe_defaults.append(var)
         
         if not safe_defaults and self.base_indicators:
             safe_defaults = [self.base_indicators[0]]
             
+        if not safe_defaults:
+            st.error("❌ Nenhum indicador base disponível para configuração")
+            return
+            
         scenario_vars = st.multiselect(
-            "Selecione variáveis para cenário personalizado:",
+            "Selecione variáveis para cenário:",
             options=self.base_indicators,
-            default=safe_defaults
+            default=safe_defaults[:3],  # Máximo 3 para interface limpa
+            help="Escolha as variáveis que serão modificadas no cenário"
         )
-        
-      # Teste de verificação
-# Teste de verificação
-if __name__ == '__main__':
-    print("Indentação verificada com sucesso!")
-    print("Todos os níveis de indentação estão consistentes")
-        # Restante da implementação...
-    
         
         # Criar diferentes cenários
         st.subheader("🌐 Configurar Cenários")
@@ -609,13 +629,17 @@ if __name__ == '__main__':
         selected_scenario = st.radio(
             "Selecione o cenário:",
             options=list(scenarios.keys()),
-            horizontal=True
+            horizontal=True,
+            help="Tipo de cenário econômico para projeção"
         )
+        
+        # Mostrar descrição do cenário
+        st.info(f"📋 **{selected_scenario}**: {scenarios[selected_scenario]}")
         
         # Configurações específicas do cenário
         scenario_params = {}
         
-        if selected_scenario == "Personalizado":
+        if selected_scenario == "Personalizado" and scenario_vars:
             st.info("🔧 Ajuste os valores para o cenário personalizado:")
             
             for var in scenario_vars:
@@ -628,16 +652,20 @@ if __name__ == '__main__':
                         min_value=0.0,
                         max_value=100.0,
                         value=float(current_value),
-                        step=0.5
+                        step=0.5,
+                        key=f"slider_{var}"
                     )
                 else:
                     # Outras variáveis
+                    min_val = max(0, current_value * 0.5) if current_value > 0 else 0
+                    max_val = current_value * 2.0 if current_value > 0 else 100
                     scenario_params[var] = st.slider(
                         f"{var.replace('_', ' ')}:",
-                        min_value=float(max(0, current_value * 0.5)),
-                        max_value=float(current_value * 2.0),
+                        min_value=float(min_val),
+                        max_value=float(max_val),
                         value=float(current_value),
-                        step=0.1
+                        step=0.1,
+                        key=f"slider_{var}"
                     )
         else:
             # Aplicar regras automáticas para cenários pré-definidos
@@ -647,7 +675,7 @@ if __name__ == '__main__':
                 if selected_scenario == "Otimista":
                     if var in ['Formacao_Bruta_Capital', 'Cobertura_Internet', 'Alfabetizacao_Jovens']:
                         scenario_params[var] = current_value * 1.2  # +20%
-                    elif var in ['Desemprego', 'Gini']:
+                    elif var in ['Desemprego', 'Gini', 'Inflacao_Anual_Consumidor']:
                         scenario_params[var] = current_value * 0.8  # -20%
                     else:
                         scenario_params[var] = current_value * 1.1  # +10%
@@ -655,7 +683,7 @@ if __name__ == '__main__':
                 elif selected_scenario == "Pessimista":
                     if var in ['Formacao_Bruta_Capital', 'Cobertura_Internet', 'Alfabetizacao_Jovens']:
                         scenario_params[var] = current_value * 0.8  # -20%
-                    elif var in ['Desemprego', 'Gini']:
+                    elif var in ['Desemprego', 'Gini', 'Inflacao_Anual_Consumidor']:
                         scenario_params[var] = current_value * 1.2  # +20%
                     else:
                         scenario_params[var] = current_value * 0.9  # -10%
@@ -664,27 +692,41 @@ if __name__ == '__main__':
                     scenario_params[var] = current_value
         
         # Executar projeção
-        if st.button("▶️ Executar Projeção"):
+        if st.button("▶️ Executar Projeção", type="primary"):
             with st.spinner(f"📊 Gerando projeção para {selected_country}..."):
-                projections = self._generate_projections(
-                    country=selected_country,
-                    base_data=latest_data,
-                    model_name=selected_model,
-                    years=projection_years,
-                    scenario_params=scenario_params
-                )
-                
-                if projections is not None:
-                    self._display_projection_results(projections, selected_country, selected_scenario)
+                try:
+                    projections = self._generate_projections(
+                        country=selected_country,
+                        base_data=latest_data,
+                        model_name=selected_model,
+                        years=projection_years,
+                        scenario_params=scenario_params
+                    )
+                    
+                    if projections is not None:
+                        self._display_projection_results(projections, selected_country, selected_scenario)
+                    else:
+                        st.error("❌ Erro ao gerar projeções")
+                        
+                except Exception as e:
+                    st.error(f"❌ Erro durante a projeção: {e}")
+                    st.exception(e)
 
     def _get_latest_country_data(self, country: str) -> Optional[Dict]:
         """Obtém os dados mais recentes para um país específico"""
         try:
             country_data = self.df_model.reset_index()
-            latest = country_data[country_data['País'] == country].sort_values('Ano', ascending=False).iloc[0].to_dict()
+            country_df = country_data[country_data['País'] == country]
+            
+            if country_df.empty:
+                st.error(f"❌ País {country} não encontrado nos dados")
+                return None
+                
+            latest = country_df.sort_values('Ano', ascending=False).iloc[0].to_dict()
             return latest
+            
         except Exception as e:
-            st.error(f"Erro ao obter dados para {country}: {str(e)}")
+            st.error(f"❌ Erro ao obter dados para {country}: {str(e)}")
             return None
 
     def _generate_projections(self, country: str, base_data: Dict, model_name: str, 
@@ -695,7 +737,7 @@ if __name__ == '__main__':
             model = self.trained_models['modelos'].get(model_name)
             
             if model is None:
-                st.error(f"Modelo {model_name} não encontrado")
+                st.error(f"❌ Modelo {model_name} não encontrado")
                 return None
             
             # Preparar dados para projeção
@@ -703,15 +745,24 @@ if __name__ == '__main__':
             current_year = int(base_data['Ano'])
             current_data = base_data.copy()
             
+            # Aplicar mudanças graduais para cenários não-personalizados
+            is_custom_scenario = len(scenario_params) <= len(self.base_indicators) // 2
+            
             for year in range(1, years + 1):
                 # Atualizar dados com parâmetros do cenário
-                for var, value in scenario_params.items():
-                    # Aplicar crescimento gradual para cenários não-personalizados
-                    if len(scenario_params) < 5:  # Cenário pré-definido (não personalizado)
-                        growth_rate = (value / current_data.get(var, value)) ** (1/years)
-                        current_data[var] = current_data.get(var, value) * growth_rate
-                    else:
-                        current_data[var] = value
+                for var, target_value in scenario_params.items():
+                    if var in current_data:
+                        if is_custom_scenario and len(scenario_params) < 5:
+                            # Aplicar crescimento gradual para cenários pré-definidos
+                            current_value = current_data.get(var, target_value)
+                            if current_value != 0:
+                                growth_rate = (target_value / current_value) ** (1/years)
+                                current_data[var] = current_value * (growth_rate ** year)
+                            else:
+                                current_data[var] = target_value
+                        else:
+                            # Para cenário personalizado, usar valor diretamente
+                            current_data[var] = target_value
                 
                 # Atualizar ano
                 current_data['Ano'] = current_year + year
@@ -719,16 +770,32 @@ if __name__ == '__main__':
                 # Preparar features para o modelo
                 features = self._prepare_features_for_projection(current_data)
                 
-                # Fazer previsão
-                if model_name in ["Regressão Linear", "Ridge Regression", "Lasso Regression"]:
-                    # Normalizar features para modelos lineares
-                    X_normalized = (features - self.trained_models['X_normalized'].mean()) / self.trained_models['X_normalized'].std()
-                    prediction = model.predict([X_normalized])[0]
-                else:
-                    prediction = model.predict([features])[0]
+                if features is None:
+                    st.error(f"❌ Erro ao preparar features para o ano {current_year + year}")
+                    return None
                 
-                # Atualizar PIB per capita previsto
-                current_data['PIB_per_capita'] = prediction
+                # Fazer previsão
+                try:
+                    if model_name in ["Regressão Linear", "Ridge Regression", "Lasso Regression"]:
+                        # Normalizar features para modelos lineares
+                        X_mean = self.trained_models['X_normalized'].mean()
+                        X_std = self.trained_models['X_normalized'].std()
+                        features_normalized = (features - X_mean) / X_std
+                        prediction = model.predict([features_normalized])[0]
+                    else:
+                        prediction = model.predict([features])[0]
+                    
+                    # Validar predição
+                    if not np.isfinite(prediction):
+                        prediction = current_data.get('PIB_per_capita', 0)
+                    
+                    # Atualizar PIB per capita previsto
+                    current_data['PIB_per_capita'] = max(0, prediction)  # Garantir valores positivos
+                    
+                except Exception as e:
+                    st.warning(f"⚠️ Erro na predição para o ano {current_year + year}: {e}")
+                    # Usar valor anterior como fallback
+                    current_data['PIB_per_capita'] = current_data.get('PIB_per_capita', 0)
                 
                 # Adicionar à lista de projeções
                 projections.append(current_data.copy())
@@ -750,159 +817,207 @@ if __name__ == '__main__':
             return full_data.sort_values('Ano')
             
         except Exception as e:
-            st.error(f"Erro ao gerar projeções: {str(e)}")
+            st.error(f"❌ Erro ao gerar projeções: {str(e)}")
+            st.exception(e)
             return None
 
-    def _prepare_features_for_projection(self, data: Dict) -> pd.Series:
+    def _prepare_features_for_projection(self, data: Dict) -> Optional[pd.Series]:
         """Prepara features para projeção com lags e crescimento"""
-        features = {}
-        
-        # Mapear indicadores base para features do modelo
-        for base_var in self.base_indicators:
-            current_value = data.get(base_var, 0)
+        try:
+            features = {}
             
-            # Features de lag
-            features[f'{base_var}_lag1'] = current_value
-            if f'{base_var}_lag2' in self.trained_models['predictors']:
-                features[f'{base_var}_lag2'] = data.get(f'{base_var}_lag1', current_value)
-            
-            # Features de crescimento
-            if f'{base_var}_growth' in self.trained_models['predictors']:
-                previous_value = data.get(f'{base_var}_lag1', current_value)
-                if previous_value != 0:
-                    growth = (current_value - previous_value) / previous_value
-                else:
-                    growth = 0
-                features[f'{base_var}_growth'] = growth
+            # Mapear indicadores base para features do modelo
+            for base_var in self.base_indicators:
+                current_value = data.get(base_var, 0)
                 
-                if f'{base_var}_growth_lag1' in self.trained_models['predictors']:
-                    features[f'{base_var}_growth_lag1'] = data.get(f'{base_var}_growth', growth)
-        
-        # Criar Series com a ordem correta das features
-        ordered_features = []
-        for predictor in self.trained_models['predictors']:
-            if predictor in features:
-                ordered_features.append(features[predictor])
-            else:
-                ordered_features.append(0)  # Preencher com zero se não existir
-        
-        return pd.Series(ordered_features, index=self.trained_models['predictors'])
+                # Features de lag
+                lag1_key = f'{base_var}_lag1'
+                if lag1_key in self.trained_models['predictors']:
+                    features[lag1_key] = current_value
+                
+                lag2_key = f'{base_var}_lag2'
+                if lag2_key in self.trained_models['predictors']:
+                    features[lag2_key] = data.get(f'{base_var}_lag1', current_value)
+                
+                # Features de crescimento
+                growth_key = f'{base_var}_growth'
+                if growth_key in self.trained_models['predictors']:
+                    previous_value = data.get(f'{base_var}_lag1', current_value)
+                    if previous_value != 0:
+                        growth = (current_value - previous_value) / previous_value
+                    else:
+                        growth = 0
+                    features[growth_key] = growth
+                    
+                    growth_lag1_key = f'{base_var}_growth_lag1'
+                    if growth_lag1_key in self.trained_models['predictors']:
+                        features[growth_lag1_key] = data.get(f'{base_var}_growth', growth)
+            
+            # Criar Series com a ordem correta das features
+            ordered_features = []
+            for predictor in self.trained_models['predictors']:
+                if predictor in features:
+                    ordered_features.append(features[predictor])
+                else:
+                    ordered_features.append(0)  # Preencher com zero se não existir
+            
+            return pd.Series(ordered_features, index=self.trained_models['predictors'])
+            
+        except Exception as e:
+            st.error(f"❌ Erro ao preparar features: {e}")
+            return None
 
     def _display_projection_results(self, projections: pd.DataFrame, country: str, scenario: str):
         """Exibe os resultados da projeção"""
         st.success(f"✅ Projeção concluída para {country} - Cenário {scenario}")
         
-        # Filtrar dados para exibição
-        historical = projections[projections['Fonte'] == 'Dados']
-        projected = projections[projections['Fonte'] == 'Modelo']
-        
-        # Gráfico de projeção
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Linha histórica
-        ax.plot(historical['Ano'], historical['PIB_per_capita'], 
-                'o-', color='steelblue', label='Dados Históricos')
-        
-        # Linha projetada
-        ax.plot(projected['Ano'], projected['PIB_per_capita'], 
-                'o--', color='green', label='Projeção')
-        
-        # Preenchimento de incerteza
-        ax.fill_between(
-            projected['Ano'],
-            projected['PIB_per_capita'] * 0.9,  # -10%
-            projected['PIB_per_capita'] * 1.1,  # +10%
-            color='green', alpha=0.1, label='Intervalo de Confiança (±10%)'
-        )
-        
-        ax.set_title(f'Projeção de PIB per capita - {country}\nCenário: {scenario}', fontweight='bold')
-        ax.set_xlabel('Ano')
-        ax.set_ylabel('PIB per capita (US$)')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        
-        # Adicionar anotações
-        last_historical = historical.iloc[-1]
-        last_projected = projected.iloc[-1]
-        
-        ax.annotate(
-            f"Último dado: {last_historical['Ano']}\n${last_historical['PIB_per_capita']:,.0f}",
-            xy=(last_historical['Ano'], last_historical['PIB_per_capita']),
-            xytext=(10, 10), textcoords='offset points',
-            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8),
-            arrowprops=dict(arrowstyle='->')
-        )
-        
-        growth_rate = ((last_projected['PIB_per_capita'] / last_historical['PIB_per_capita']) ** 
-                      (1/(len(projected)) - 1) * 100)
-        
-        ax.annotate(
-            f"Projeção {last_projected['Ano']}\n${last_projected['PIB_per_capita']:,.0f}\n"
-            f"Cresc. anual: {growth_rate:.1f}%",
-            xy=(last_projected['Ano'], last_projected['PIB_per_capita']),
-            xytext=(-100, 10), textcoords='offset points',
-            bbox=dict(boxstyle='round,pad=0.3', facecolor='green', alpha=0.3),
-            arrowprops=dict(arrowstyle='->')
-        )
-        
-        st.pyplot(fig)
-        plt.close()
-        
-        # Estatísticas resumidas
-        st.subheader("📊 Resumo da Projeção")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        initial_pib = last_historical['PIB_per_capita']
-        final_pib = last_projected['PIB_per_capita']
-        years = len(projected)
-        
-        with col1:
-            st.metric("PIB per capita Inicial", f"${initial_pib:,.0f}")
-        
-        with col2:
-            st.metric("PIB per capita Projetado", f"${final_pib:,.0f}")
-        
-        with col3:
-            st.metric("Crescimento Anual Médio", f"{growth_rate:.1f}%")
-        
-        # Tabela com valores projetados
-        st.subheader("📋 Valores Projetados")
-        
-        # Formatar colunas para exibição
-        display_cols = ['Ano', 'PIB_per_capita'] + [c for c in projections.columns 
-                                                   if c in self.base_indicators and 
-                                                   c in scenario_params.keys()]
-        
-        projected_display = projected[display_cols].copy()
-        
-        # Formatar valores monetários
-        money_cols = ['PIB_per_capita'] + [c for c in display_cols 
-                                          if c in ['Formacao_Bruta_Capital', 'Valor_Exportacoes', 
-                                                  'Consumo_Familias', 'Investimento_Estrangeiro_Direto']]
-        
-        for col in money_cols:
-            if col in projected_display.columns:
-                projected_display[col] = projected_display[col].apply(lambda x: f"${x:,.0f}")
-        
-        # Formatar percentuais
-        pct_cols = [c for c in display_cols if c in ['Alfabetizacao_Jovens', 'Desemprego', 'Gini', 
-                                                    'Cobertura_Internet', 'Inflacao_Anual_Consumidor']]
-        
-        for col in pct_cols:
-            if col in projected_display.columns:
-                projected_display[col] = projected_display[col].apply(lambda x: f"{x:.1f}%")
-        
-        st.dataframe(projected_display.set_index('Ano'), use_container_width=True)
-        
-        # Botão de download
-        csv_data = projected[display_cols].to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Baixar Projeção como CSV",
-            data=csv_data,
-            file_name=f"projecao_{country}_{scenario.lower()}.csv",
-            mime='text/csv'
-        )
+        try:
+            # Filtrar dados para exibição
+            historical = projections[projections['Fonte'] == 'Dados']
+            projected = projections[projections['Fonte'] == 'Modelo']
+            
+            if historical.empty or projected.empty:
+                st.error("❌ Dados insuficientes para exibir projeção")
+                return
+            
+            # Gráfico de projeção
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            # Linha histórica
+            ax.plot(historical['Ano'], historical['PIB_per_capita'], 
+                    'o-', color='steelblue', linewidth=2, markersize=6, label='Dados Históricos')
+            
+            # Linha projetada
+            ax.plot(projected['Ano'], projected['PIB_per_capita'], 
+                    'o--', color='green', linewidth=2, markersize=6, label='Projeção')
+            
+            # Preenchimento de incerteza
+            ax.fill_between(
+                projected['Ano'],
+                projected['PIB_per_capita'] * 0.9,  # -10%
+                projected['PIB_per_capita'] * 1.1,  # +10%
+                color='green', alpha=0.1, label='Intervalo de Incerteza (±10%)'
+            )
+            
+            ax.set_title(f'Projeção de PIB per capita - {country}\nCenário: {scenario}', 
+                        fontsize=16, fontweight='bold')
+            ax.set_xlabel('Ano', fontsize=12)
+            ax.set_ylabel('PIB per capita (US$)', fontsize=12)
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # Adicionar anotações
+            try:
+                last_historical = historical.iloc[-1]
+                last_projected = projected.iloc[-1]
+                
+                ax.annotate(
+                    f"Último dado: {last_historical['Ano']:.0f}\n${last_historical['PIB_per_capita']:,.0f}",
+                    xy=(last_historical['Ano'], last_historical['PIB_per_capita']),
+                    xytext=(10, 10), textcoords='offset points',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8),
+                    arrowprops=dict(arrowstyle='->')
+                )
+                
+                # Calcular taxa de crescimento anual
+                years_diff = len(projected)
+                if years_diff > 0 and last_historical['PIB_per_capita'] > 0:
+                    growth_rate = ((last_projected['PIB_per_capita'] / last_historical['PIB_per_capita']) ** (1/years_diff) - 1) * 100
+                else:
+                    growth_rate = 0
+                
+                ax.annotate(
+                    f"Projeção {last_projected['Ano']:.0f}\n${last_projected['PIB_per_capita']:,.0f}\n"
+                    f"Cresc. anual: {growth_rate:.1f}%",
+                    xy=(last_projected['Ano'], last_projected['PIB_per_capita']),
+                    xytext=(-100, 10), textcoords='offset points',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='green', alpha=0.3),
+                    arrowprops=dict(arrowstyle='->')
+                )
+                
+            except Exception as e:
+                st.warning(f"⚠️ Erro ao adicionar anotações: {e}")
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+            
+            # Estatísticas resumidas
+            st.subheader("📊 Resumo da Projeção")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            try:
+                initial_pib = historical.iloc[-1]['PIB_per_capita']
+                final_pib = projected.iloc[-1]['PIB_per_capita']
+                years = len(projected)
+                
+                if initial_pib > 0 and years > 0:
+                    growth_rate = ((final_pib / initial_pib) ** (1/years) - 1) * 100
+                else:
+                    growth_rate = 0
+                
+                with col1:
+                    st.metric("PIB per capita Inicial", f"${initial_pib:,.0f}")
+                
+                with col2:
+                    st.metric("PIB per capita Projetado", f"${final_pib:,.0f}", 
+                             delta=f"${final_pib - initial_pib:,.0f}")
+                
+                with col3:
+                    st.metric("Crescimento Anual Médio", f"{growth_rate:.1f}%")
+                    
+            except Exception as e:
+                st.error(f"❌ Erro ao calcular estatísticas: {e}")
+            
+            # Tabela com valores projetados
+            st.subheader("📋 Valores Projetados")
+            
+            try:
+                # Preparar dados para tabela
+                display_cols = ['Ano', 'PIB_per_capita']
+                
+                # Adicionar colunas dos indicadores modificados no cenário
+                if hasattr(self, 'last_scenario_params'):
+                    for col in self.last_scenario_params.keys():
+                        if col in projected.columns:
+                            display_cols.append(col)
+                
+                projected_display = projected[display_cols].copy()
+                
+                # Formatar valores monetários
+                money_cols = ['PIB_per_capita', 'Formacao_Bruta_Capital', 'Valor_Exportacoes', 
+                             'Consumo_Familias', 'Investimento_Estrangeiro_Direto']
+                
+                for col in money_cols:
+                    if col in projected_display.columns:
+                        projected_display[col] = projected_display[col].apply(lambda x: f"${x:,.0f}")
+                
+                # Formatar percentuais
+                pct_cols = ['Alfabetizacao_Jovens', 'Desemprego', 'Gini', 
+                           'Cobertura_Internet', 'Inflacao_Anual_Consumidor']
+                
+                for col in pct_cols:
+                    if col in projected_display.columns:
+                        projected_display[col] = projected_display[col].apply(lambda x: f"{x:.1f}%")
+                
+                st.dataframe(projected_display.set_index('Ano'), use_container_width=True)
+                
+                # Botão de download
+                csv_data = projected[display_cols].to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Baixar Projeção como CSV",
+                    data=csv_data,
+                    file_name=f"projecao_{country}_{scenario.lower().replace(' ', '_')}.csv",
+                    mime='text/csv'
+                )
+                
+            except Exception as e:
+                st.error(f"❌ Erro ao exibir tabela: {e}")
+            
+        except Exception as e:
+            st.error(f"❌ Erro ao exibir resultados: {e}")
+            st.exception(e)
 
 def add_projections_to_main():
     """Adiciona funcionalidade de projeções ao sistema principal"""
@@ -912,15 +1027,18 @@ def add_projections_to_main():
     
     # Verificar se os modelos foram treinados
     if 'models_data' in st.session_state and 'df_model' in st.session_state:
-        projection_system = EconomicProjectionSystem(
-            df_model=st.session_state.df_model,
-            trained_models=st.session_state.models_data,
-            models_results=st.session_state.models_data['resultados']
-        )
-        projection_system.create_projection_interface()
+        try:
+            projection_system = EconomicProjectionSystem(
+                df_model=st.session_state.df_model,
+                trained_models=st.session_state.models_data,
+                models_results=st.session_state.models_data['resultados']
+            )
+            projection_system.create_projection_interface()
+        except Exception as e:
+            st.error(f"❌ Erro ao inicializar sistema de projeções: {e}")
+            st.info("🔄 Execute primeiro a seção de treinamento de modelos para habilitar as projeções.")
     else:
         st.info("🔄 Execute primeiro a seção de treinamento de modelos para habilitar as projeções.")
-
 
 def main():
     st.set_page_config(
@@ -941,6 +1059,7 @@ def main():
     - ✅ Estratégia multinível de imputação de dados
     - ✅ 6 modelos de ML com avaliação comparativa
     - ✅ Análise de importância das variáveis
+    - ✅ **Sistema de projeções econômicas corrigido**
     - ✅ Interface interativa completa
     """)
     
@@ -1521,11 +1640,10 @@ Relatório gerado pelo Sistema de Análise Econômica "Código da Riqueza"
     else:
         st.warning("⚠️ Nenhum dado disponível para o país e período selecionados")
     
-    
     # --- PROJEÇÕES ECONÔMICAS ---
     add_projections_to_main()
 
-# --- INFORMAÇÕES TÉCNICAS ---
+    # --- INFORMAÇÕES TÉCNICAS ---
     with st.expander("🔍 Informações Técnicas e Metodologia"):
         
         col1, col2 = st.columns(2)
@@ -1610,6 +1728,12 @@ Relatório gerado pelo Sistema de Análise Econômica "Código da Riqueza"
             4. **Validação**:
                - Validação in-sample
                - Análise de importância de features
+            
+            5. **Sistema de Projeções**:
+               - Cenários econômicos (Otimista, Pessimista, Status Quo)
+               - Configuração personalizada de indicadores
+               - Projeções de 1-10 anos
+               - Intervalos de confiança
             """)
             
             st.subheader("⚠️ Limitações e Disclaimers")
@@ -1620,7 +1744,8 @@ Relatório gerado pelo Sistema de Análise Econômica "Código da Riqueza"
             • **Não captura choques externos**: Crises, pandemias, guerras
             • **Baseado em dados históricos**: Padrões passados podem não se repetir
             • **Não inclui políticas futuras**: Mudanças regulatórias não previstas
-            • **Intervalo de confiança**: ±10-20% nas análises
+            • **Intervalo de confiança**: ±10-20% nas projeções
+            • **Dependência de dados**: Qualidade limitada pela fonte
             
             **Este sistema é uma ferramenta de apoio à decisão, não substituindo análise especializada em economia.**
             """)
@@ -1631,7 +1756,7 @@ Relatório gerado pelo Sistema de Análise Econômica "Código da Riqueza"
     <div style='text-align: center; color: #666; font-size: 0.9em;'>
         <b>🏛️ Sistema de Análise Econômica "Código da Riqueza"</b><br>
         Desenvolvido com dados do Banco Mundial e técnicas avançadas de Machine Learning<br>
-        Versão Corrigida | © 2024
+        <b>✅ Versão Corrigida com Sistema de Projeções Funcional</b> | © 2024
     </div>
     """, unsafe_allow_html=True)
 
@@ -1712,6 +1837,7 @@ else:
                 print("   ✅ Estratégia multinível de imputação")
                 print("   ✅ 6 modelos de ML comparados")
                 print("   ✅ Análise de importância de variáveis")
+                print("   ✅ Sistema de projeções econômicas CORRIGIDO")
                 print("   ✅ Interface interativa completa")
                 
             else:
