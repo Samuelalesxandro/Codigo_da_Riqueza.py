@@ -545,9 +545,266 @@ class EconomicProjectionSystem:
         return base_indicators
 
     def create_projection_interface():
-        ...
-        # conteúdo omitido para brevidade - incluir a função completa como fornecida
-        ...
+    """Cria interface Streamlit para projeções econômicas"""
+    
+    st.header("🔮 Projeções Econômicas Avançadas")
+    
+    # Verificar se os dados necessários estão disponíveis
+    required_session_vars = ['df_model', 'models_data']
+    missing_vars = [var for var in required_session_vars if var not in st.session_state]
+    
+    if missing_vars:
+        st.error(f"❌ Dados necessários não encontrados: {missing_vars}")
+        st.info("Por favor, execute primeiro a seção de treinamento de modelos.")
+        return
+    
+    df_model = st.session_state.df_model
+    models_data = st.session_state.models_data
+    
+    # Inicializar sistema de projeções
+    projection_system = EconomicProjectionSystem(
+        df_model=df_model,
+        trained_models=models_data['modelos'],
+        models_results=models_data['resultados']
+    )
+    
+    # Configurações da projeção
+    st.subheader("⚙️ Configurações da Projeção")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        available_countries = sorted(df_model.reset_index()['País'].unique())
+        selected_country = st.selectbox(
+            "País para projeção:",
+            available_countries,
+            help="Escolha o país para análise prospectiva"
+        )
+    
+    with col2:
+        years_ahead = st.slider(
+            "Horizonte (anos):",
+            min_value=1,
+            max_value=10,
+            value=5,
+            help="Número de anos para projetar no futuro"
+        )
+    
+    with col3:
+        available_models = models_data['resultados']['Modelo'].tolist()
+        selected_model = st.selectbox(
+            "Modelo de projeção:",
+            available_models,
+            index=0,
+            help="Modelo de ML para fazer as projeções"
+        )
+    
+    st.subheader("📊 Cenários Econômicos")
+    scenarios = projection_system.create_projection_scenarios()
+    scenario_tabs = st.tabs(list(scenarios.keys()) + ["Personalizado"])
+    projections_results = {}
+    
+    for i, (scenario_name, scenario_data) in enumerate(scenarios.items()):
+        with scenario_tabs[i]:
+            st.write(f"**{scenario_data['description']}**")
+            st.write("**Principais ajustes anuais:**")
+            adjustments_df = pd.DataFrame([
+                {"Indicador": k.replace('_', ' ').title(), "Crescimento Anual": f"{v:+.1%}"}
+                for k, v in scenario_data['adjustments'].items()
+            ])
+            st.dataframe(adjustments_df, use_container_width=True, hide_index=True)
+            
+            if st.button(f"🚀 Calcular Projeção - {scenario_name}", key=f"calc_{scenario_name}"):
+                with st.spinner(f"Calculando projeção {scenario_name}..."):
+                    try:
+                        future_data = projection_system.generate_future_data(
+                            country=selected_country,
+                            years_ahead=years_ahead,
+                            scenario=scenario_name
+                        )
+                        results = projection_system.make_projections(future_data, selected_model)
+                        projections_results[scenario_name] = results
+                        
+                        st.success(f"✅ Projeção {scenario_name} calculada com sucesso!")
+                        initial_gdp = results['predicoes'][0]
+                        final_gdp = results['predicoes'][-1]
+                        cagr = ((final_gdp / initial_gdp) ** (1/years_ahead) - 1) * 100
+                        
+                        col_a, col_b, col_c = st.columns(3)
+                        with col_a:
+                            st.metric("PIB per capita inicial", f"${initial_gdp:,.0f}")
+                        with col_b:
+                            st.metric("PIB per capita final", f"${final_gdp:,.0f}")
+                        with col_c:
+                            st.metric("Crescimento anual médio", f"{cagr:+.1f}%")
+                    except Exception as e:
+                        st.error(f"❌ Erro ao calcular projeção: {str(e)}")
+    
+    with scenario_tabs[-1]:
+        st.write("**Crie seu próprio cenário econômico**")
+        custom_adjustments = {}
+        col1, col2 = st.columns(2)
+        key_indicators = [
+            "Formacao_Bruta_Capital", "Valor_Exportacoes", "Consumo_Familias",
+            "Investimento_Estrangeiro_Direto", "Cobertura_Internet", 
+            "Alfabetizacao_Jovens", "Desemprego", "Inflacao_Anual_Consumidor"
+        ]
+        
+        for i, indicator in enumerate(key_indicators):
+            col = col1 if i % 2 == 0 else col2
+            with col:
+                display_name = indicator.replace('_', ' ').title()
+                adjustment = st.slider(
+                    f"{display_name}:",
+                    min_value=-0.10,
+                    max_value=0.15,
+                    value=0.02,
+                    step=0.005,
+                    format="%.1%%",
+                    key=f"custom_{indicator}",
+                    help=f"Crescimento anual para {display_name}"
+                )
+                custom_adjustments[indicator] = adjustment
+        
+        if st.button("🎯 Calcular Cenário Personalizado", key="calc_custom"):
+            with st.spinner("Calculando cenário personalizado..."):
+                try:
+                    future_data = projection_system.generate_future_data(
+                        country=selected_country,
+                        years_ahead=years_ahead,
+                        scenario="custom",
+                        custom_adjustments=custom_adjustments
+                    )
+                    results = projection_system.make_projections(future_data, selected_model)
+                    projections_results["Personalizado"] = results
+                    
+                    st.success("✅ Cenário personalizado calculado com sucesso!")
+                    initial_gdp = results['predicoes'][0]
+                    final_gdp = results['predicoes'][-1]
+                    cagr = ((final_gdp / initial_gdp) ** (1/years_ahead) - 1) * 100
+                    
+                    col_a, col_b, col_c = st.columns(3)
+                    with col_a:
+                        st.metric("PIB per capita inicial", f"${initial_gdp:,.0f}")
+                    with col_b:
+                        st.metric("PIB per capita final", f"${final_gdp:,.0f}")
+                    with col_c:
+                        st.metric("Crescimento anual médio", f"{cagr:+.1f}%")
+                except Exception as e:
+                    st.error(f"❌ Erro ao calcular cenário personalizado: {str(e)}")
+    
+    if projections_results:
+        st.subheader("📈 Comparação de Cenários")
+        fig, ax = plt.subplots(figsize=(12, 8))
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        
+        for i, (scenario, results) in enumerate(projections_results.items()):
+            color = colors[i % len(colors)]
+            ax.plot(results['anos'], results['predicoes'], 
+                    marker='o', linewidth=3, markersize=6, 
+                    label=scenario, color=color, alpha=0.9)
+            ax.fill_between(results['anos'], 
+                            results['intervalo_inferior'], 
+                            results['intervalo_superior'],
+                            alpha=0.2, color=color)
+        
+        ax.set_title(f'Projeções do PIB per capita - {selected_country}', 
+                     fontsize=16, fontweight='bold')
+        ax.set_xlabel('Ano', fontsize=12)
+        ax.set_ylabel('PIB per capita (US$)', fontsize=12)
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.grid(True, alpha=0.3)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
+        
+        st.subheader("📊 Resumo Comparativo dos Cenários")
+        comparison_data = []
+        for scenario, results in projections_results.items():
+            initial_gdp = results['predicoes'][0]
+            final_gdp = results['predicoes'][-1]
+            cagr = ((final_gdp / initial_gdp) ** (1/years_ahead) - 1) * 100
+            total_growth = ((final_gdp / initial_gdp) - 1) * 100
+            
+            comparison_data.append({
+                'Cenário': scenario,
+                'PIB Inicial (US$)': f"${initial_gdp:,.0f}",
+                'PIB Final (US$)': f"${final_gdp:,.0f}",
+                'Crescimento Total': f"{total_growth:+.1f}%",
+                'Crescimento Anual': f"{cagr:+.1f}%",
+                'Modelo R²': f"{results['r2']:.3f}"
+            })
+        
+        comparison_df = pd.DataFrame(comparison_data)
+        st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+        
+        st.subheader("💾 Exportar Resultados")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            all_projections = []
+            for scenario, results in projections_results.items():
+                for i, year in enumerate(results['anos']):
+                    all_projections.append({
+                        'País': selected_country,
+                        'Cenário': scenario,
+                        'Ano': year,
+                        'PIB_per_capita_projetado': results['predicoes'][i],
+                        'Intervalo_Inferior': results['intervalo_inferior'][i],
+                        'Intervalo_Superior': results['intervalo_superior'][i],
+                        'Modelo': results['modelo_usado']
+                    })
+            projections_df = pd.DataFrame(all_projections)
+            csv_data = projections_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Baixar Projeções (CSV)",
+                data=csv_data,
+                file_name=f"projecoes_{selected_country}_{years_ahead}anos.csv",
+                mime='text/csv'
+            )
+        
+        with col2:
+            report = f\"""RELATÓRIO DE PROJEÇÕES ECONÔMICAS
+{selected_country} - Horizonte: {years_ahead} anos
+Modelo utilizado: {selected_model}
+Gerado em: {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}
+
+RESUMO EXECUTIVO:
+\"""
+            for scenario, results in projections_results.items():
+                initial_gdp = results['predicoes'][0]
+                final_gdp = results['predicoes'][-1]
+                cagr = ((final_gdp / initial_gdp) ** (1/years_ahead) - 1) * 100
+                report += f\"""\n{scenario.upper()}:
+• PIB per capita inicial: ${initial_gdp:,.0f}
+• PIB per capita final: ${final_gdp:,.0f}
+• Crescimento anual médio: {cagr:+.2f}%
+• R² do modelo: {results['r2']:.3f}
+\"""
+            report += f\""""
+
+METODOLOGIA:
+• Modelo de projeção: {selected_model}
+• Precisão do modelo (RMSE): ${models_data['resultados'].iloc[0]['RMSE']:,.0f}
+• Intervalo de confiança: ±95%
+• Features utilizadas: {len(models_data['predictors'])} variáveis
+
+DISCLAIMER:
+As projeções são baseadas em modelos econométricos e cenários 
+hipotéticos. Resultados reais podem variar significativamente 
+devido a choques externos, mudanças políticas e outros fatores 
+não previstos nos modelos.
+
+Sistema "Código da Riqueza" - Versão Projeções
+\"""
+            st.download_button(
+                label="📄 Baixar Relatório",
+                data=report.encode('utf-8'),
+                file_name=f"relatorio_projecoes_{selected_country}.txt",
+                mime='text/plain'
+            )
+
 
 def add_projections_to_main():
     """Adiciona funcionalidade de projeções ao sistema principal"""
