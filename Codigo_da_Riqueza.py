@@ -529,7 +529,7 @@ class EconomicProjectionSystem:
                 base_indicators.append(base_name)
         return base_indicators
 
-    def class EconomicProjectionSystem:
+class EconomicProjectionSystem:
     """Sistema avançado de projeções econômicas com múltiplos cenários - VERSÃO CORRIGIDA"""
     
     def __init__(self, df_model: pd.DataFrame, trained_models: Dict, models_results: pd.DataFrame):
