@@ -542,23 +542,43 @@ class EconomicProjectionSystem:
                 base_indicators.append(base_name)
         return base_indicators
 
+    class EconomicProjectionSystem:
+    """Sistema avançado de projeções econômicas com múltiplos cenários"""
+    
+    def __init__(self, df_model: pd.DataFrame, trained_models: Dict, models_results: pd.DataFrame):
+        self.df_model = df_model
+        self.trained_models = trained_models
+        self.models_results = models_results
+        self.base_indicators = self._get_base_indicators()
+        
+    def _get_base_indicators(self) -> List[str]:
+        """Identifica indicadores base (sem lag/growth)"""
+        all_cols = [col for col in self.df_model.columns if col != 'PIB_per_capita']
+        base_indicators = []
+        
+        for col in all_cols:
+            base_name = col.replace('_lag1', '').replace('_lag2', '').replace('_growth_lag1', '').replace('_growth', '')
+            if base_name not in base_indicators and base_name in self.df_model.columns:
+                base_indicators.append(base_name)
+        return base_indicators
+
     def create_projection_interface(self):
-    """Cria interface Streamlit para projeções econômicas"""
-    st.header("🔮 Projeções Econômicas - Cenários Futuros")
-    
-    # Verificar se temos os dados necessários
-    if not hasattr(self, 'df_model') or not hasattr(self, 'trained_models'):
-        st.warning("⚠️ Dados necessários não disponíveis para projeções")
-        return
-    
-    # Selecionar país para projeção
-    available_countries = sorted(self.df_model.reset_index()['País'].unique())
-    selected_country = st.selectbox(
-        "Selecione o país para projeção:",
-        options=available_countries,
-        index=available_countries.index('BRA') if 'BRA' in available_countries else 0
-    )
-    
+        """Cria interface Streamlit para projeções econômicas"""
+        st.header("🔮 Projeções Econômicas - Cenários Futuros")
+        
+        # Verificar se temos os dados necessários
+        if not hasattr(self, 'df_model') or not hasattr(self, 'trained_models'):
+            st.warning("⚠️ Dados necessários não disponíveis para projeções")
+            return
+        
+        # Selecionar país para projeção
+        available_countries = sorted(self.df_model.reset_index()['País'].unique())
+        selected_country = st.selectbox(
+            "Selecione o país para projeção:",
+            options=available_countries,
+            index=available_countries.index('BRA') if 'BRA' in available_countries else 0
+        )
+            
     # Obter dados mais recentes do país selecionado
     latest_data = self._get_latest_country_data(selected_country)
     
