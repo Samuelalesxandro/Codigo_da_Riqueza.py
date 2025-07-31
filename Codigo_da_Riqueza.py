@@ -27,21 +27,29 @@ INDICADORES = {
     "NE.EXP.GNFS.CD": "Valor_Exportacoes",
     "NE.CON.PRVT.CD": "Consumo_Familias",
     "BX.KLT.DINV.CD.WD": "Investimento_Estrangeiro_Direto",
+    "FP.CPI.TOTL.ZG": "Inflacao_Anual_Consumidor",
+    "GC.DOD.TOTL.GD.ZS": "Divida_Governo_Central_perc_PIB",
     
     # Indicadores de Capital Humano
     "SE.ADT.1524.LT.ZS": "Alfabetizacao_Jovens",
+    "SE.PRM.CMPT.ZS": "Conclusao_Ensino_Primario",
+    "SE.XPD.TOTL.GD.ZS": "Gastos_Governamentais_Educacao",
+    "SP.DYN.LE00.IN": "Expectativa_de_Vida",
     
     # Indicadores de Trabalho e Produtividade
     "SL.TLF.CACT.ZS": "Participacao_Forca_Trabalho",
     "SL.UEM.TOTL.ZS": "Desemprego",
     
     # Indicadores de Infraestrutura e Tecnologia
+    "IT.NET.USER.ZS": "Cobertura_Internet",
+    "EG.ELC.ACCS.ZS": "Acesso_Eletricidade",
     "SH.H2O.BASW.ZS": "Cobertura_Agua_Potavel",
     "TX.VAL.TECH.MF.ZS": "Exportacoes_Alta_Tecnologia_perc",
     
     # Indicadores de Governança e Distribuição
-    "SI.POV.GINI": "Gini"
-   
+    "SI.POV.GINI": "Gini",
+    "IQ.CPA.BREG.XQ": "Qualidade_Regulatoria",
+    "MS.MIL.XPND.GD.ZS": "Gastos_Militares_perc_PIB"
 }
 
 # Grupos de países para análise comparativa
@@ -861,38 +869,78 @@ def main():
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # Adicionar anotações para valores máximo e mínimo
-        max_idx = y_data.idxmax()
-        min_idx = y_data.idxmin()
-        
-        ax.annotate(f'Máx: {y_data.iloc[max_idx]:,.0f}', 
-                   xy=(x_data.iloc[max_idx], y_data.iloc[max_idx]),
-                   xytext=(10, 10), textcoords='offset points',
-                   bbox=dict(boxstyle='round,pad=0.3', facecolor='green', alpha=0.7),
-                   arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
-        
-        ax.annotate(f'Mín: {y_data.iloc[min_idx]:,.0f}', 
-                   xy=(x_data.iloc[min_idx], y_data.iloc[min_idx]),
-                   xytext=(10, -20), textcoords='offset points',
-                   bbox=dict(boxstyle='round,pad=0.3', facecolor='red', alpha=0.7),
-                   arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+        # Adicionar anotações para valores máximo e mínimo - VERSÃO CORRIGIDA
+        try:
+            if len(y_data) > 0 and not y_data.empty:
+                # Encontrar índices válidos
+                max_idx = y_data.idxmax()
+                min_idx = y_data.idxmin()
+                
+                # Verificar se os índices existem em ambas as séries
+                if max_idx in x_data.index and max_idx in y_data.index:
+                    max_x = x_data.loc[max_idx]
+                    max_y = y_data.loc[max_idx]
+                    ax.annotate(f'Máx: {max_y:,.0f}', 
+                               xy=(max_x, max_y),
+                               xytext=(10, 10), textcoords='offset points',
+                               bbox=dict(boxstyle='round,pad=0.3', facecolor='green', alpha=0.7),
+                               arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+                
+                if min_idx in x_data.index and min_idx in y_data.index:
+                    min_x = x_data.loc[min_idx]
+                    min_y = y_data.loc[min_idx]
+                    ax.annotate(f'Mín: {min_y:,.0f}', 
+                               xy=(min_x, min_y),
+                               xytext=(10, -20), textcoords='offset points',
+                               bbox=dict(boxstyle='round,pad=0.3', facecolor='red', alpha=0.7),
+                               arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+        except Exception as e:
+            # Se houver erro nas anotações, continua sem elas
+            st.warning(f"⚠️ Não foi possível adicionar anotações de máx/mín: {e}")
+            pass
         
         plt.tight_layout()
         st.pyplot(fig)
         plt.close()
         
-        # Estatísticas resumidas
+        # Estatísticas resumidas - VERSÃO CORRIGIDA
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Valor Atual", f"{y_data.iloc[-1]:,.0f}")
+            try:
+                current_value = y_data.iloc[-1] if len(y_data) > 0 else 0
+                st.metric("Valor Atual", f"{current_value:,.0f}")
+            except:
+                st.metric("Valor Atual", "N/A")
+                
         with col2:
-            growth_rate = ((y_data.iloc[-1] / y_data.iloc[0]) ** (1/(len(y_data)-1)) - 1) * 100 if len(y_data) > 1 else 0
-            st.metric("Crescimento Anual Médio", f"{growth_rate:+.1f}%")
+            try:
+                if len(y_data) > 1:
+                    initial_value = y_data.iloc[0]
+                    final_value = y_data.iloc[-1]
+                    if initial_value > 0:
+                        growth_rate = ((final_value / initial_value) ** (1/(len(y_data)-1)) - 1) * 100
+                    else:
+                        growth_rate = 0
+                else:
+                    growth_rate = 0
+                st.metric("Crescimento Anual Médio", f"{growth_rate:+.1f}%")
+            except:
+                st.metric("Crescimento Anual Médio", "N/A")
+                
         with col3:
-            st.metric("Máximo Histórico", f"{y_data.max():,.0f}")
+            try:
+                max_value = y_data.max() if len(y_data) > 0 else 0
+                st.metric("Máximo Histórico", f"{max_value:,.0f}")
+            except:
+                st.metric("Máximo Histórico", "N/A")
+                
         with col4:
-            st.metric("Mínimo Histórico", f"{y_data.min():,.0f}")
+            try:
+                min_value = y_data.min() if len(y_data) > 0 else 0
+                st.metric("Mínimo Histórico", f"{min_value:,.0f}")
+            except:
+                st.metric("Mínimo Histórico", "N/A")
     
     else:
         st.warning("⚠️ Nenhum dado disponível para os filtros selecionados")
@@ -915,30 +963,45 @@ def main():
         
         with col2:
             st.write("**📊 Correlações com PIB per capita**")
-            if 'PIB_per_capita' in df_filtered.columns:
-                correlations = df_filtered[numeric_cols].corr()['PIB_per_capita'].sort_values(ascending=False)
-                correlations = correlations.drop('PIB_per_capita').head(10)
-                
-                # Gráfico de correlações
-                fig, ax = plt.subplots(figsize=(8, 6))
-                colors = ['green' if x > 0 else 'red' for x in correlations.values]
-                bars = ax.barh(range(len(correlations)), correlations.values, color=colors, alpha=0.7)
-                ax.set_yticks(range(len(correlations)))
-                ax.set_yticklabels([col.replace('_', ' ').title() for col in correlations.index])
-                ax.set_xlabel('Correlação com PIB per capita')
-                ax.set_title('Top 10 Correlações', fontweight='bold')
-                ax.grid(True, alpha=0.3, axis='x')
-                ax.axvline(x=0, color='black', linewidth=0.8)
-                
-                # Adicionar valores nas barras
-                for bar, value in zip(bars, correlations.values):
-                    width = bar.get_width()
-                    ax.text(width + (0.02 if width > 0 else -0.02), bar.get_y() + bar.get_height()/2, 
-                           f'{value:.2f}', ha='left' if width > 0 else 'right', va='center', fontweight='bold')
-                
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close()
+            try:
+                if 'PIB_per_capita' in df_filtered.columns and len(df_filtered) > 1:
+                    # Verificar se há dados suficientes
+                    pib_data = df_filtered['PIB_per_capita'].dropna()
+                    if len(pib_data) > 1:
+                        correlations = df_filtered[numeric_cols].corr()['PIB_per_capita'].sort_values(ascending=False)
+                        correlations = correlations.drop('PIB_per_capita', errors='ignore').head(10)
+                        
+                        if len(correlations) > 0:
+                            # Gráfico de correlações
+                            fig, ax = plt.subplots(figsize=(8, 6))
+                            colors = ['green' if x > 0 else 'red' for x in correlations.values]
+                            bars = ax.barh(range(len(correlations)), correlations.values, color=colors, alpha=0.7)
+                            ax.set_yticks(range(len(correlations)))
+                            ax.set_yticklabels([col.replace('_', ' ').title() for col in correlations.index])
+                            ax.set_xlabel('Correlação com PIB per capita')
+                            ax.set_title('Top 10 Correlações', fontweight='bold')
+                            ax.grid(True, alpha=0.3, axis='x')
+                            ax.axvline(x=0, color='black', linewidth=0.8)
+                            
+                            # Adicionar valores nas barras
+                            for bar, value in zip(bars, correlations.values):
+                                width = bar.get_width()
+                                ax.text(width + (0.02 if width > 0 else -0.02), bar.get_y() + bar.get_height()/2, 
+                                       f'{value:.2f}', ha='left' if width > 0 else 'right', va='center', fontweight='bold')
+                            
+                            plt.tight_layout()
+                            st.pyplot(fig)
+                            plt.close()
+                        else:
+                            st.info("📊 Não há correlações significativas para exibir")
+                    else:
+                        st.info("📊 Dados insuficientes para análise de correlação")
+                else:
+                    st.info("📊 PIB per capita não disponível para análise de correlação")
+                    
+            except Exception as e:
+                st.warning(f"⚠️ Erro ao calcular correlações: {e}")
+                st.info("📊 Análise de correlação não disponível para este país/período")
         
         # Tabela de dados completos
         st.write("**📋 Dados Completos do Período Selecionado**")
@@ -978,7 +1041,7 @@ def main():
             )
         
         with col2:
-            # Criar relatório resumido
+            # Criar relatório resumido - VERSÃO CORRIGIDA
             report = f"""
 RELATÓRIO ECONÔMICO - {selected_country}
 Período: {year_start:.0f} - {year_end:.0f}
@@ -987,26 +1050,45 @@ Gerado em: {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}
 INDICADORES PRINCIPAIS:
 """
             
-            if 'PIB_per_capita' in df_filtered.columns:
-                pib_inicial = df_filtered['PIB_per_capita'].iloc[0]
-                pib_final = df_filtered['PIB_per_capita'].iloc[-1]
-                crescimento_periodo = ((pib_final / pib_inicial) ** (1/(len(df_filtered)-1)) - 1) * 100
-                
-                report += f"""
+            try:
+                if 'PIB_per_capita' in df_filtered.columns and len(df_filtered) > 0:
+                    pib_data = df_filtered['PIB_per_capita'].dropna()
+                    if len(pib_data) > 1:
+                        pib_inicial = pib_data.iloc[0]
+                        pib_final = pib_data.iloc[-1]
+                        if pib_inicial > 0:
+                            crescimento_periodo = ((pib_final / pib_inicial) ** (1/(len(pib_data)-1)) - 1) * 100
+                        else:
+                            crescimento_periodo = 0
+                        
+                        report += f"""
 • PIB per capita inicial: ${pib_inicial:,.0f}
 • PIB per capita final: ${pib_final:,.0f}
 • Crescimento anual médio: {crescimento_periodo:.2f}%
 
 """
-            
-            # Adicionar outros indicadores importantes
-            key_indicators = ['Alfabetizacao_Jovens', 'Desemprego', 'Cobertura_Internet', 'Gini']
-            for indicator in key_indicators:
-                if indicator in df_filtered.columns:
-                    initial_val = df_filtered[indicator].iloc[0]
-                    final_val = df_filtered[indicator].iloc[-1]
-                    change = final_val - initial_val
-                    report += f"• {indicator.replace('_', ' ')}: {initial_val:.1f} → {final_val:.1f} ({change:+.1f})\n"
+                    elif len(pib_data) == 1:
+                        report += f"""
+• PIB per capita: ${pib_data.iloc[0]:,.0f}
+• Dados disponíveis apenas para um ano
+
+"""
+                
+                # Adicionar outros indicadores importantes - COM VERIFICAÇÃO
+                key_indicators = ['Alfabetizacao_Jovens', 'Desemprego', 'Cobertura_Internet', 'Gini']
+                for indicator in key_indicators:
+                    if indicator in df_filtered.columns:
+                        indicator_data = df_filtered[indicator].dropna()
+                        if len(indicator_data) >= 2:
+                            initial_val = indicator_data.iloc[0]
+                            final_val = indicator_data.iloc[-1]
+                            change = final_val - initial_val
+                            report += f"• {indicator.replace('_', ' ')}: {initial_val:.1f} → {final_val:.1f} ({change:+.1f})\n"
+                        elif len(indicator_data) == 1:
+                            report += f"• {indicator.replace('_', ' ')}: {indicator_data.iloc[0]:.1f}\n"
+                
+            except Exception as e:
+                report += f"\n⚠️ Erro ao processar alguns indicadores: {str(e)}\n"
             
             report += f"""
 
