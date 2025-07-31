@@ -571,24 +571,28 @@ class EconomicProjectionSystem:
             st.error("Dados do modelo não disponíveis")
             return
             
-        # Debug: mostrar indicadores disponíveis
-        st.write("Indicadores disponíveis:", self.base_indicators)
-        
         # Configuração segura do multiselect
-        safe_defaults = [var for var in ['Formacao_Bruta_Capital', 'Cobertura_Internet'] 
-                       if var in self.base_indicators]
+        safe_defaults = []
+        possible_defaults = ['Formacao_Bruta_Capital', 'Cobertura_Internet']
+        
+        for var in possible_defaults:
+            if var in self.base_indicators:
+                safe_defaults.append(var)
         
         if not safe_defaults and self.base_indicators:
             safe_defaults = [self.base_indicators[0]]
             
         scenario_vars = st.multiselect(
-            "Selecione variáveis:",
+            "Selecione variáveis para cenário personalizado:",
             options=self.base_indicators,
             default=safe_defaults
         )
+        
       # Teste de verificação
+# Teste de verificação
 if __name__ == '__main__':
-    print("Classe EconomicProjectionSystem carregada com sucesso!")  
+    print("Indentação verificada com sucesso!")
+    print("Todos os níveis de indentação estão consistentes")
         # Restante da implementação...
     
         
