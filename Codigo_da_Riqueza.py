@@ -566,12 +566,12 @@ class EconomicProjectionSystem:
         """Cria interface Streamlit para projeções econômicas"""
         st.header("🔮 Projeções Econômicas - Cenários Futuros")
         
-        # Verificar se temos os dados necessários
+        # Verificar dados disponíveis
         if not hasattr(self, 'df_model') or not hasattr(self, 'trained_models'):
             st.warning("⚠️ Dados necessários não disponíveis para projeções")
             return
         
-        # Selecionar país para projeção
+        # Seleção de país
         available_countries = sorted(self.df_model.reset_index()['País'].unique())
         selected_country = st.selectbox(
             "Selecione o país para projeção:",
@@ -579,20 +579,11 @@ class EconomicProjectionSystem:
             index=available_countries.index('BRA') if 'BRA' in available_countries else 0
         )
         
-        # Obter dados mais recentes do país selecionado
-        latest_data = self._get_latest_country_data(selected_country)
-        
-        if latest_data is None:
-            st.error(f"❌ Dados insuficientes para {selected_country}")
-            return
-        
         # Configuração de cenários
         st.subheader("⚙️ Configuração de Cenários")
-        
         col1, col2 = st.columns(2)
         
         with col1:
-            # Selecionar modelo para projeção
             model_options = self.models_results['Modelo'].tolist()
             selected_model = st.selectbox(
                 "Modelo para projeção:",
@@ -600,7 +591,6 @@ class EconomicProjectionSystem:
                 index=0
             )
             
-            # Número de anos para projetar
             projection_years = st.slider(
                 "Anos para projetar:",
                 min_value=1,
@@ -609,21 +599,27 @@ class EconomicProjectionSystem:
             )
         
         with col2:
-            # Selecionar variáveis para cenário personalizado
             st.write("**Variáveis para ajuste:**")
             
-            # Verificar quais valores padrão existem nas opções
-            available_defaults = [var for var in ['Formacao_Bruta_Capital', 'Cobertura_Internet'] 
-                                if var in self.base_indicators]
+            # Verificação segura dos valores padrão
+            safe_defaults = []
+            possible_defaults = ['Formacao_Bruta_Capital', 'Cobertura_Internet']
             
-            # Se nenhum padrão estiver disponível, usar lista vazia
-            default_values = available_defaults if available_defaults else []
+            for var in possible_defaults:
+                if var in self.base_indicators:
+                    safe_defaults.append(var)
+            
+            # Garante que pelo menos um padrão válido existe
+            if not safe_defaults and self.base_indicators:
+                safe_defaults = [self.base_indicators[0]]
             
             scenario_vars = st.multiselect(
                 "Selecione variáveis para cenário personalizado:",
                 options=self.base_indicators,
-                default=default_values
+                default=safe_defaults
             )
+        
+        # Resto da implementação...
     
         
         # Criar diferentes cenários
