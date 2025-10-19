@@ -53,7 +53,6 @@ ZONA_DO_EURO = ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', '
 BRICS = ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE']      
 PAISES_SUL_AMERICA = ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'PRY', 'URY']
 PAISES_SUDESTE_ASIATICO = ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN']
-# Linha 56 - CORRIGIDA: PAISESTE_ASIATICO -> PAISES_SUDESTE_ASIATICO
 TODOS_PAISES = list(set(PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + BRICS + ZONA_DO_EURO))
 DATA_INICIO = datetime(1995, 1, 1)
 DATA_FIM = datetime(2025, 4, 30)
@@ -104,10 +103,10 @@ def processar_dados(df_raw):
 
     # --- Nova Parte: Limpeza e Conversão de Dados Numéricos ---
     # Obter colunas que NÃO são 'País' ou 'Ano'
-    colunas_numericas = df.select_dtypes(include=[np.number, 'object']).columns.tolist()
-    colunas_numericas = [col for col in colunas_numericas if col not in ['País', 'Ano']]
+    # Usar df.columns para obter todas as colunas antes de criar os lags
+    colunas_para_converter = [col for col in df.columns if col not in ['País', 'Ano']]
 
-    for col in colunas_numericas:
+    for col in colunas_para_converter:
         # Tenta converter a coluna para float, forçando erros a se tornarem NaN
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
