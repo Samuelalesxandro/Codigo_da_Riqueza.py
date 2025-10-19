@@ -9,3 +9,4 @@ numpy
 streamlit
 shap
 plotly
+statsmodels
