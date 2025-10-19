@@ -33,7 +33,7 @@ except Exception:
 # -------------------- Config --------------------
 INDICADORES = {
     "NY.GDP.PCAP.KD": "PIB_per_capita",
-    "NE.GDI.FTOT.CD": "Formacao_Bruta_Capital",
+    "NE.GDI.FTOT.CD": "Formacao_Bruta_Capital", 
     "SE.ADT.1524.LT.ZS": "Alfabetizacao_Jovens",
     "SL.TLF.CACT.ZS": "Participacao_Forca_Trabalho",
     "NE.RSB.GNFS.CD": "Balanca_Comercial",
@@ -50,7 +50,7 @@ INDICADORES = {
 }
 
 ZONA_DO_EURO = ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', 'BEL']
-BRICS = ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE']
+BRICS = ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE']      
 PAISES_SUL_AMERICA = ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'PRY', 'URY']
 PAISES_SUDESTE_ASIATICO = ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN']
 TODOS_PAISES = list(set(PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + BRICS + ZONA_DO_EURO))
@@ -526,6 +526,92 @@ def aba_sensibilidade(df_model, models_data):
         except Exception as e:
             st.error(f"Erro na análise: {e}")
 
+def aba_analise_comparada(df_model, models_data):
+    """Nova aba para análise comparada entre países."""
+    st.header("🌍 Análise Comparada de Crescimento")
+    st.write("Compare o crescimento projetado entre diferentes países.")
+
+    modelo = models_data['modelos']['XGBoost']  # Usando o XGBoost como padrão
+
+    paises_disponiveis = sorted(df_model['País'].unique())
+    paises_selecionados = st.multiselect(
+        "Selecione os países para comparar (máximo 5):",
+        paises_disponiveis,
+        default=paises_disponiveis[:3] if len(paises_disponiveis) >= 3 else paises_disponiveis
+    )
+
+    ano_final = st.slider("Ano final da projeção para comparação", 2026, 2040, 2035)
+
+    if len(paises_selecionados) > 5:
+        st.warning("Por favor, selecione no máximo 5 países.")
+        paises_selecionados = paises_selecionados[:5]
+
+    if st.button("📊 Comparar Crescimento") and len(paises_selecionados) >= 2:
+        try:
+            with st.spinner("Gerando comparações..."):
+                fig, ax = plt.subplots(figsize=(14, 8))
+                cores = plt.cm.Set3(np.linspace(0, 1, len(paises_selecionados)))
+                dados_comparacao = []
+                df_anos = df_model.copy()
+                df_anos['Ano'] = pd.to_numeric(df_anos['Ano'], errors='coerce').astype(int)
+                ultimo_ano_real = int(df_anos['Ano'].max())
+
+                for i, pais in enumerate(paises_selecionados):
+                    df_pais = gerar_projecao_realista_improved(df_model, pais, modelo, ano_final=ano_final, uncertainty=False)
+                    df_pais['Ano'] = pd.to_numeric(df_pais['Ano'], errors='coerce').astype(int)
+                    
+                    df_hist = df_pais[df_pais['Ano'] <= ultimo_ano_real].copy()
+                    df_proj = df_pais[df_pais['Ano'] > ultimo_ano_real].copy()
+
+                    if not df_hist.empty:
+                        ax.plot(df_hist['Ano'], df_hist['PIB_per_capita'], 
+                               'o-', color=cores[i], alpha=0.7, linewidth=2, label=f'{pais} (Histórico)')
+                    if not df_proj.empty:
+                        ax.plot(df_proj['Ano'], df_proj['PIB_per_capita'], 
+                               's--', color=cores[i], alpha=0.9, linewidth=2, label=f'{pais} (Projetado)')
+
+                    if not df_proj.empty and not df_hist.empty:
+                        pib_inicial = float(df_hist['PIB_per_capita'].iloc[-1])
+                        pib_final = float(df_proj['PIB_per_capita'].iloc[-1])
+                        anos_projecao = len(df_proj)
+                        crescimento_anual = (((pib_final / pib_inicial) ** (1/anos_projecao)) - 1) * 100
+                        dados_comparacao.append({
+                            'País': pais,
+                            'PIB Atual': pib_inicial,
+                            'PIB Projetado': pib_final,
+                            'Crescimento Anual (%)': crescimento_anual
+                        })
+
+                ax.set_title(f'Comparação de Crescimento Projetado entre Países (Até {ano_final})')
+                ax.set_xlabel('Ano')
+                ax.set_ylabel('PIB per capita (US$)')
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close()
+
+                if dados_comparacao:
+                    df_comp = pd.DataFrame(dados_comparacao)
+                    df_comp = df_comp.sort_values('Crescimento Anual (%)', ascending=False)
+                    df_comp['PIB Atual'] = df_comp['PIB Atual'].apply(lambda x: f"${x:,.0f}")
+                    df_comp['PIB Projetado'] = df_comp['PIB Projetado'].apply(lambda x: f"${x:,.0f}")
+                    df_comp['Crescimento Anual (%)'] = df_comp['Crescimento Anual (%)'].apply(lambda x: f"{x:.2f}%")
+                    
+                    st.subheader("📊 Tabela de Comparação")
+                    st.dataframe(df_comp, hide_index=True)
+
+                    melhor = df_comp.iloc[0]
+                    pior = df_comp.iloc[-1]
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.success(f"🏆 **Maior crescimento:** {melhor['País']}")
+                    with col2:
+                        st.info(f"📉 **Menor crescimento:** {pior['País']}")
+
+        except Exception as e:
+            st.error(f"Erro na comparação: {e}")
+
 def main():
     st.set_page_config(page_title="Código da Riqueza — Análise Econômica com ML", layout="wide")
     st.title("💰 Código da Riqueza")
@@ -546,12 +632,34 @@ def main():
         models_data = treinar_todos_modelos(df_model)
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Comparação de Modelos", "🌍 Projeção por País", "🔬 Sensibilidade", "🎨 Geração de Figuras"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Comparação de Modelos", "🌍 Projeção por País", "🔬 Sensibilidade", "🌐 Comparação entre Países", "🎨 Geração de Figuras"])
 
     with tab1:
         st.subheader("Tabela de Desempenho dos Modelos")
         st.dataframe(models_data['resultados'], use_container_width=True)
         st.markdown("**Melhor modelo:** " + models_data['resultados'].iloc[0]['Modelo'])
+
+        # Gráfico de desempenho dos modelos
+        df_resultados = models_data['resultados']
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        # R²
+        axes[0].bar(df_resultados['Modelo'], df_resultados['R²'], color='skyblue')
+        axes[0].set_title('R² Score')
+        axes[0].set_ylabel('R²')
+        axes[0].tick_params(axis='x', rotation=45)
+        # RMSE
+        axes[1].bar(df_resultados['Modelo'], df_resultados['RMSE'], color='lightcoral')
+        axes[1].set_title('RMSE (menor é melhor)')
+        axes[1].set_ylabel('RMSE')
+        axes[1].tick_params(axis='x', rotation=45)
+        # MAE
+        axes[2].bar(df_resultados['Modelo'], df_resultados['MAE'], color='lightgreen')
+        axes[2].set_title('MAE (menor é melhor)')
+        axes[2].set_ylabel('MAE')
+        axes[2].tick_params(axis='x', rotation=45)
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
 
     with tab2:
         aba_projecao_pais(df_model, models_data)
@@ -560,6 +668,9 @@ def main():
         aba_sensibilidade(df_model, models_data)
 
     with tab4:
+        aba_analise_comparada(df_model, models_data)
+
+    with tab5:
         aba_geracao_figuras(df_model, models_data)
 
 if __name__ == "__main__":
