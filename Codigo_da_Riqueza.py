@@ -13,8 +13,17 @@ import streamlit as st
 from xgboost import XGBRegressor
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
 from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, VotingRegressor
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import VarianceThreshold
+
+# Testes Estatísticos
+from statsmodels.tsa.stattools import adfuller, durbin_watson
+from scipy import stats
+from scipy.stats import pearsonr
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 # Optional packages (SHAP)
 try:
@@ -33,7 +42,7 @@ except Exception:
 # -------------------- Config --------------------
 INDICADORES = {
     "NY.GDP.PCAP.KD": "PIB_per_capita",
-    "NE.GDI.FTOT.CD": "Formacao_Bruta_Capital", 
+    "NE.GDI.FTOT.CD": "Formacao_Bruta_Capital",
     "SE.ADT.1524.LT.ZS": "Alfabetizacao_Jovens",
     "SL.TLF.CACT.ZS": "Participacao_Forca_Trabalho",
     "NE.RSB.GNFS.CD": "Balanca_Comercial",
@@ -50,7 +59,7 @@ INDICADORES = {
 }
 
 ZONA_DO_EURO = ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', 'BEL']
-BRICS = ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE']      
+BRICS = ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE']
 PAISES_SUL_AMERICA = ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'PRY', 'URY']
 PAISES_SUDESTE_ASIATICO = ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN']
 TODOS_PAISES = list(set(PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + BRICS + ZONA_DO_EURO))
@@ -102,18 +111,11 @@ def processar_dados(df_raw):
     df = df.dropna()
 
     # --- Nova Parte: Limpeza e Conversão de Dados Numéricos ---
-    # Obter colunas que NÃO são 'País' ou 'Ano'
-    # Usar df.columns para obter todas as colunas antes de criar os lags
     colunas_para_converter = [col for col in df.columns if col not in ['País', 'Ano']]
-
     for col in colunas_para_converter:
-        # Tenta converter a coluna para float, forçando erros a se tornarem NaN
         df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    # Preenche novamente possíveis NaNs introduzidos pela conversão, se necessário
-    # (Embora o ffill/bfill anterior já deva ter lidado com isso na maioria dos casos)
     df = df.groupby('País', group_keys=False).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
-    df = df.dropna() # Remove novamente se houver NaNs persistentes após conversão
+    df = df.dropna()
     # --- Fim da Nova Parte ---
 
     df_model = df.copy().set_index(['País','Ano'])
@@ -122,6 +124,94 @@ def processar_dados(df_raw):
             df_model[f"{col}_lag1"] = df_model.groupby('País')[col].shift(1)
     df_model = df_model.dropna()
     return df, df_model.reset_index()
+
+# -------------------- Testes Estatísticos e Diagnósticos --------------------
+def teste_adf(df_model, coluna, pais_teste=None):
+    """Teste ADF para estacionariedade."""
+    if pais_teste:
+        df_pais = df_model[df_model['País'] == pais_teste]
+        if df_pais.empty or coluna not in df_pais.columns:
+            st.warning(f"Dados insuficientes para {coluna} no país {pais_teste}")
+            return None
+        serie = df_pais[coluna].dropna()
+    else:
+        # Teste para a série combinada de todos os países (atenção: pode não ser estatisticamente ideal)
+        serie = df_model[coluna].dropna()
+
+    if len(serie) < 3:
+        st.warning(f"Série muito curta para ADF em {coluna}")
+        return None
+
+    try:
+        adf_result = adfuller(serie, autolag='AIC')
+        return {
+            'estatistica': adf_result[0],
+            'p_valor': adf_result[1],
+            'critico_1%': adf_result[4]['1%'],
+            'critico_5%': adf_result[4]['5%'],
+            'critico_10%': adf_result[4]['10%'],
+            'estacionaria': adf_result[1] <= 0.05 # H0: não é estacionário
+        }
+    except Exception as e:
+        st.warning(f"Erro no teste ADF para {coluna}: {e}")
+        return None
+
+def teste_durbin_watson(residuos):
+    """Teste de Durbin-Watson para autocorrelação."""
+    try:
+        dw_stat = durbin_watson(residuos)
+        return dw_stat
+    except Exception as e:
+        st.warning(f"Erro no teste Durbin-Watson: {e}")
+        return None
+
+def calcular_vif(X):
+    """Cálculo do VIF para detectar multicolinearidade."""
+    try:
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        vif_data = pd.DataFrame()
+        vif_data["Variável"] = X.columns
+        vif_data["VIF"] = [variance_inflation_factor(X_scaled, i) for i in range(len(X.columns))]
+        return vif_data
+    except Exception as e:
+        st.warning(f"Erro no cálculo do VIF: {e}")
+        return pd.DataFrame()
+
+def analise_residuos(y_true, y_pred, modelo_nome):
+    """Avaliação dos resíduos do modelo."""
+    residuos = y_true - y_pred
+    dw_stat = teste_durbin_watson(residuos)
+    st.write(f"### Diagnóstico de Resíduos - {modelo_nome}")
+    if dw_stat is not None:
+        st.write(f"**Teste de Durbin-Watson:** {dw_stat:.2f}")
+        if 1.5 < dw_stat < 2.5:
+            st.success("Resíduos parecem ser independentes (ausência de autocorrelação de primeira ordem).")
+        else:
+            st.warning("Possível autocorrelação nos resíduos (DW != 2).")
+
+    # Gráfico de resíduos
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.scatter(y_pred, residuos, alpha=0.6)
+    ax.axhline(0, color='red', linestyle='--')
+    ax.set_xlabel('Valores Preditos')
+    ax.set_ylabel('Resíduos')
+    ax.set_title(f'Resíduos vs. Preditos - {modelo_nome}')
+    st.pyplot(fig)
+    plt.close()
+
+def analise_outliers(df_model, limite_z=3):
+    """Detecção de outliers usando Z-score."""
+    outliers_dict = {}
+    numeric_cols = df_model.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        z_scores = np.abs(stats.zscore(df_model[col]))
+        outliers = df_model[z_scores > limite_z]
+        outliers_dict[col] = outliers
+        if not outliers.empty:
+            st.write(f"**Outliers detectados em '{col}':**")
+            st.dataframe(outliers[['País', 'Ano', col]])
+    return outliers_dict
 
 # -------------------- Modeling --------------------
 def treinar_todos_modelos(df_model):
@@ -132,6 +222,11 @@ def treinar_todos_modelos(df_model):
     PREDICTORS = [c for c in df_model.columns if c.endswith('_lag1')]
     X = df_model[PREDICTORS]
     y = df_model[TARGET]
+
+    # --- Validação Cruzada Temporal ---
+    tscv = TimeSeriesSplit(n_splits=5)
+    resultados_cv = {}
+
     modelos = {
         "Regressão Linear": LinearRegression(),
         "Ridge": Ridge(alpha=1.0, random_state=42),
@@ -140,22 +235,71 @@ def treinar_todos_modelos(df_model):
         "Random Forest": RandomForestRegressor(n_estimators=100, max_depth=6, random_state=42, n_jobs=-1),
         "XGBoost": XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42, n_jobs=-1)
     }
+
+    # --- Ensemble: Voting Regressor ---
+    # Usando os três melhores modelos da comparação original (ajuste conforme necessário)
+    # Suponha que XGBoost, Random Forest e Ridge sejam os melhores
+    ensemble_model = VotingRegressor([
+        ('xgb', XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42, n_jobs=-1)),
+        ('rf', RandomForestRegressor(n_estimators=100, max_depth=6, random_state=42, n_jobs=-1)),
+        ('ridge', Ridge(alpha=1.0, random_state=42))
+    ])
+    modelos["Ensemble (Voting)"] = ensemble_model
+
     resultados = []
     modelos_treinados = {}
     for nome, modelo in modelos.items():
+        # Treinamento
         modelo.fit(X, y)
         y_pred = modelo.predict(X)
+
+        # Métricas de Treino
         r2 = r2_score(y, y_pred)
         rmse = np.sqrt(mean_squared_error(y, y_pred))
         mae = mean_absolute_error(y, y_pred)
-        resultados.append({'Modelo':nome,'R²':round(r2,4),'RMSE':round(rmse,2),'MAE':round(mae,2)})
+
+        # Validação Cruzada Temporal
+        cv_scores_r2 = []
+        cv_scores_rmse = []
+        cv_scores_mae = []
+        for train_index, test_index in tscv.split(X):
+            X_train_cv, X_test_cv = X.iloc[train_index], X.iloc[test_index]
+            y_train_cv, y_test_cv = y.iloc[train_index], y.iloc[test_index]
+            modelo_cv = type(modelo)(**modelo.get_params()) # Cria uma nova instância com os mesmos parâmetros
+            modelo_cv.fit(X_train_cv, y_train_cv)
+            y_pred_cv = modelo_cv.predict(X_test_cv)
+            cv_scores_r2.append(r2_score(y_test_cv, y_pred_cv))
+            cv_scores_rmse.append(np.sqrt(mean_squared_error(y_test_cv, y_pred_cv)))
+            cv_scores_mae.append(mean_absolute_error(y_test_cv, y_pred_cv))
+
+        cv_r2_mean = np.mean(cv_scores_r2)
+        cv_r2_std = np.std(cv_scores_r2)
+        cv_rmse_mean = np.mean(cv_scores_rmse)
+        cv_rmse_std = np.std(cv_scores_rmse)
+        cv_mae_mean = np.mean(cv_scores_mae)
+        cv_mae_std = np.std(cv_scores_mae)
+
+        resultados.append({
+            'Modelo': nome,
+            'R²': round(r2, 4),
+            'RMSE': round(rmse, 2),
+            'MAE': round(mae, 2),
+            'CV_R²_Mean': round(cv_r2_mean, 4),
+            'CV_R²_Std': round(cv_r2_std, 4),
+            'CV_RMSE_Mean': round(cv_rmse_mean, 2),
+            'CV_RMSE_Std': round(cv_rmse_std, 2),
+            'CV_MAE_Mean': round(cv_mae_mean, 2),
+            'CV_MAE_Std': round(cv_mae_std, 2)
+        })
         modelos_treinados[nome] = modelo
+
         if hasattr(modelo, 'feature_importances_'):
             modelos_treinados[f"{nome}_importance"] = pd.Series(modelo.feature_importances_, index=PREDICTORS).sort_values(ascending=False)
+
     _cached_models = {'resultados':pd.DataFrame(resultados).sort_values('R²', ascending=False), 'modelos':modelos_treinados, 'X':X, 'y':y, 'predictors':PREDICTORS}
     return _cached_models
 
-# -------------------- Improved projections --------------------
+# --- Funções de Projeção e Sensibilidade (mantidas como estavam ou ligeiramente adaptadas) ---
 def gerar_projecao_realista_improved(df_model, pais, modelo, ano_final=2035, uncertainty=True):
     df = df_model.copy()
     dfp = df[df['País']==pais].sort_values('Ano').reset_index(drop=True)
@@ -265,7 +409,6 @@ def gerar_projecao_realista_improved(df_model, pais, modelo, ano_final=2035, unc
         df_proj.loc[hist_len:hist_len+len(rows)-1,'PIB_med'] = median
     return df_proj
 
-# -------------------- Improved sensitivity --------------------
 def analise_sensibilidade_improved(df_model, pais, modelo, indicador_base, pct_variation=10, ano_horizon=2030):
     dfm = df_model.copy().reset_index()
     if pais not in dfm['País'].unique():
@@ -284,7 +427,7 @@ def analise_sensibilidade_improved(df_model, pais, modelo, indicador_base, pct_v
     elasticity = impact_pct / pct_variation if pct_variation != 0 else np.nan
     return {'base':base_proj, 'shocked':shocked_proj, 'impact_pct':impact_pct, 'elasticity':elasticity}
 
-# -------------------- Figures (TCC & SHAP) --------------------
+# --- Funções de Geração de Figuras (mantidas como estavam) ---
 def fig_importancia_variaveis(modelo_xgboost, feature_names, out_path="figuras_tcc/Figura1_Importancia_Variaveis.png"):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     importancias = getattr(modelo_xgboost, 'feature_importances_', None)
@@ -348,11 +491,9 @@ def fig_cenarios_china(df_model, modelo, out_path="figuras_tcc/Figura4_Cenarios_
 def fig_ranking_crescimento(df_model, modelo, top_n=10, out_path="figuras_tcc/Figura5_Ranking_Crescimento.png"):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     cres = []
-    # Use the countries available in the *input* df_model
-    # Filter for countries that exist in the dataset
     available_countries = df_model['País'].unique()
     countries_to_process = [pais for pais in TODOS_PAISES if pais in available_countries]
-    for pais in countries_to_process: # Iterate only over countries present in the data
+    for pais in countries_to_process:
         try:
             proj = gerar_projecao_realista_improved(df_model, pais, modelo, ano_final=2035, uncertainty=False)
             proj = proj.reset_index(drop=True)
@@ -363,29 +504,24 @@ def fig_ranking_crescimento(df_model, modelo, top_n=10, out_path="figuras_tcc/Fi
                 pib_f = float(df_fut.iloc[-1]['PIB_per_capita'])
                 anos = len(df_fut)
                 taxa = (((pib_f/pib_i)**(1/anos))-1)*100
-                # Ensure the column name matches the one used in sort_values
                 cres.append({'País': pais, 'Taxa Anual (%)': taxa})
         except Exception:
-            # If an error occurs for a specific country, just skip it and continue
             continue
 
-    # Check if the cres list is empty before creating the DataFrame
-    if not cres: # If cres is empty
+    if not cres:
         print(f"Debug: No data generated for ranking in fig_ranking_crescimento. Available countries: {list(available_countries)}")
-        return None # Or return an empty plot if preferred
+        return None
 
     df_rank = pd.DataFrame(cres).sort_values('Taxa Anual (%)', ascending=False).head(top_n)
 
-    # Check if df_rank is empty after sorting and slicing
     if df_rank.empty:
         print("Debug: df_rank is empty after sorting and slicing.")
-        return None # Or return an empty plot if preferred
+        return None
 
     fig, ax = plt.subplots(figsize=(12, 8))
     colors = plt.cm.RdYlGn(np.linspace(0.3, 0.9, len(df_rank)))
     ax.barh(df_rank['País'], df_rank['Taxa Anual (%)'], color=colors)
     for i, row in enumerate(df_rank.itertuples()):
-        # Use getattr or row._2; row._1 is the index
         ax.text(row._2 + 0.1, i, f"{row._2:.1f}%", va='center', fontsize=9)
     ax.set_xlabel('Taxa anual (%)')
     ax.set_title('Figura 5 - Ranking de crescimento projetado (2025-2035)')
@@ -575,15 +711,15 @@ def aba_analise_comparada(df_model, models_data):
                 for i, pais in enumerate(paises_selecionados):
                     df_pais = gerar_projecao_realista_improved(df_model, pais, modelo, ano_final=ano_final, uncertainty=False)
                     df_pais['Ano'] = pd.to_numeric(df_pais['Ano'], errors='coerce').astype(int)
-                    
+
                     df_hist = df_pais[df_pais['Ano'] <= ultimo_ano_real].copy()
                     df_proj = df_pais[df_pais['Ano'] > ultimo_ano_real].copy()
 
                     if not df_hist.empty:
-                        ax.plot(df_hist['Ano'], df_hist['PIB_per_capita'], 
+                        ax.plot(df_hist['Ano'], df_hist['PIB_per_capita'],
                                'o-', color=cores[i], alpha=0.7, linewidth=2, label=f'{pais} (Histórico)')
                     if not df_proj.empty:
-                        ax.plot(df_proj['Ano'], df_proj['PIB_per_capita'], 
+                        ax.plot(df_proj['Ano'], df_proj['PIB_per_capita'],
                                's--', color=cores[i], alpha=0.9, linewidth=2, label=f'{pais} (Projetado)')
 
                     if not df_proj.empty and not df_hist.empty:
@@ -613,7 +749,7 @@ def aba_analise_comparada(df_model, models_data):
                     df_comp['PIB Atual'] = df_comp['PIB Atual'].apply(lambda x: f"${x:,.0f}")
                     df_comp['PIB Projetado'] = df_comp['PIB Projetado'].apply(lambda x: f"${x:,.0f}")
                     df_comp['Crescimento Anual (%)'] = df_comp['Crescimento Anual (%)'].apply(lambda x: f"{x:.2f}%")
-                    
+
                     st.subheader("📊 Tabela de Comparação")
                     st.dataframe(df_comp, hide_index=True)
 
@@ -627,6 +763,93 @@ def aba_analise_comparada(df_model, models_data):
 
         except Exception as e:
             st.error(f"Erro na comparação: {e}")
+
+# --- NOVA ABA: Diagnósticos e Estatísticas ---
+def aba_diagnosticos(df_model, models_data):
+    st.header("🔍 Diagnósticos e Estatísticas")
+    st.write("Análise estatística dos dados e diagnósticos do modelo.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        pais_selecionado = st.selectbox("Selecione um país para testes estatísticos:", sorted(df_model['País'].unique()))
+        indicador_selecionado = st.selectbox("Selecione um indicador para teste ADF:", [c.replace('_lag1', '') for c in models_data['predictors']])
+    with col2:
+        modelo_selecionado_nome = st.selectbox("Selecione o modelo para diagnóstico de resíduos:", list(models_data['modelos'].keys()))
+        modelo_selecionado = models_data['modelos'][modelo_selecionado_nome]
+
+    # Teste ADF
+    if st.button(f"Testar Estacionariedade ({indicador_selecionado}) - {pais_selecionado}"):
+        lag_col = f"{indicador_selecionado}_lag1"
+        if lag_col in df_model.columns:
+            adf_result = teste_adf(df_model, lag_col, pais_selecionado)
+            if adf_result:
+                st.write(f"**Teste ADF para {indicador_selecionado} em {pais_selecionado}:**")
+                st.write(f"  - Estatística ADF: {adf_result['estatistica']:.4f}")
+                st.write(f"  - P-valor: {adf_result['p_valor']:.4f}")
+                st.write(f"  - Crítico (1%): {adf_result['critico_1%']:.4f}")
+                st.write(f"  - Crítico (5%): {adf_result['critico_5%']:.4f}")
+                st.write(f"  - Crítico (10%): {adf_result['critico_10%']:.4f}")
+                if adf_result['estacionaria']:
+                    st.success("A série é estacionária (rejeita H0).")
+                else:
+                    st.warning("A série NÃO é estacionária (não rejeita H0).")
+
+    # Diagnóstico de Resíduos
+    if st.button(f"Analisar Resíduos - {modelo_selecionado_nome}"):
+        y_true = models_data['y']
+        y_pred = modelo_selecionado.predict(models_data['X'])
+        analise_residuos(y_true, y_pred, modelo_selecionado_nome)
+
+    # VIF
+    if st.button("Calcular VIF (Variância Inflation Factor)"):
+        vif_df = calcular_vif(models_data['X'])
+        if not vif_df.empty:
+            st.write("**VIF para variáveis preditoras:**")
+            st.dataframe(vif_df)
+            high_vif = vif_df[vif_df['VIF'] > 10]
+            if not high_vif.empty:
+                st.warning("⚠️ Variáveis com VIF > 10 (possível multicolinearidade):")
+                st.dataframe(high_vif)
+
+    # Outliers
+    if st.button("Detectar Outliers (Z-Score)"):
+        analise_outliers(df_model)
+
+    # Correlação entre variáveis (exemplo)
+    if st.button("Mostrar Matriz de Correlação (10 principais preditores)"):
+        top_predictors = models_data['predictors'][:10] # Exemplo com os primeiros 10
+        if len(top_predictors) > 0:
+            corr_matrix = df_model[top_predictors].corr()
+            fig, ax = plt.subplots(figsize=(10, 8))
+            sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0, ax=ax)
+            ax.set_title("Matriz de Correlação - Top 10 Preditores")
+            st.pyplot(fig)
+            plt.close()
+
+# --- NOVA ABA: Ensemble e Validação Cruzada ---
+def aba_ensemble_validacao(df_model, models_data):
+    st.header("🧩 Modelos Ensemble e Validação Cruzada")
+    st.write("Comparação de modelos ensemble e resultados da validação cruzada temporal.")
+
+    resultados_df = models_data['resultados']
+    if 'CV_R²_Mean' in resultados_df.columns:
+        st.subheader("📊 Resultados da Validação Cruzada Temporal (5-Folds)")
+        st.dataframe(resultados_df[['Modelo', 'R²', 'CV_R²_Mean', 'CV_R²_Std', 'CV_RMSE_Mean', 'CV_RMSE_Std', 'CV_MAE_Mean', 'CV_MAE_Std']].style.format({
+            'R²': '{:.4f}',
+            'CV_R²_Mean': '{:.4f}',
+            'CV_R²_Std': '{:.4f}',
+            'CV_RMSE_Mean': '{:,.2f}',
+            'CV_RMSE_Std': '{:,.2f}',
+            'CV_MAE_Mean': '{:,.2f}',
+            'CV_MAE_Std': '{:,.2f}'
+        }))
+
+        melhor_cv_nome = resultados_df.loc[resultados_df['CV_R²_Mean'].idxmax(), 'Modelo']
+        melhor_cv_r2 = resultados_df['CV_R²_Mean'].max()
+        st.success(f"**Melhor Modelo (CV R² Mean):** {melhor_cv_nome} (R² CV Mean: {melhor_cv_r2:.4f})")
+    else:
+        st.warning("Resultados da Validação Cruzada Temporal não encontrados. Verifique a função de treinamento.")
+
 
 def main():
     st.set_page_config(page_title="Código da Riqueza — Análise Econômica com ML", layout="wide")
@@ -644,33 +867,41 @@ def main():
         st.stop()
 
     # Train models
-    with st.spinner("Treinando modelos..."):
+    with st.spinner("Treinando modelos (incluindo ensemble e validação cruzada)..."):
         models_data = treinar_todos_modelos(df_model)
 
     # Tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Comparação de Modelos", "🌍 Projeção por País", "🔬 Sensibilidade", "🌐 Comparação entre Países", "🎨 Geração de Figuras"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📊 Comparação de Modelos",
+        "🧩 Ensemble & Validação",
+        "🌍 Projeção por País",
+        "🔬 Sensibilidade",
+        "🌐 Comparação entre Países",
+        "🔍 Diagnósticos",
+        "🎨 Geração de Figuras"
+    ])
 
     with tab1:
-        st.subheader("Tabela de Desempenho dos Modelos")
-        st.dataframe(models_data['resultados'], use_container_width=True)
-        st.markdown("**Melhor modelo:** " + models_data['resultados'].iloc[0]['Modelo'])
+        st.subheader("Tabela de Desempenho dos Modelos (Treino)")
+        st.dataframe(models_data['resultados'][['Modelo', 'R²', 'RMSE', 'MAE']], use_container_width=True)
+        st.markdown("**Melhor modelo (R² Treino):** " + models_data['resultados'].iloc[0]['Modelo'])
 
         # Gráfico de desempenho dos modelos
         df_resultados = models_data['resultados']
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         # R²
         axes[0].bar(df_resultados['Modelo'], df_resultados['R²'], color='skyblue')
-        axes[0].set_title('R² Score')
+        axes[0].set_title('R² Score (Treino)')
         axes[0].set_ylabel('R²')
         axes[0].tick_params(axis='x', rotation=45)
         # RMSE
         axes[1].bar(df_resultados['Modelo'], df_resultados['RMSE'], color='lightcoral')
-        axes[1].set_title('RMSE (menor é melhor)')
+        axes[1].set_title('RMSE (Treino)')
         axes[1].set_ylabel('RMSE')
         axes[1].tick_params(axis='x', rotation=45)
         # MAE
         axes[2].bar(df_resultados['Modelo'], df_resultados['MAE'], color='lightgreen')
-        axes[2].set_title('MAE (menor é melhor)')
+        axes[2].set_title('MAE (Treino)')
         axes[2].set_ylabel('MAE')
         axes[2].tick_params(axis='x', rotation=45)
         plt.tight_layout()
@@ -678,15 +909,21 @@ def main():
         plt.close()
 
     with tab2:
-        aba_projecao_pais(df_model, models_data)
+        aba_ensemble_validacao(df_model, models_data)
 
     with tab3:
-        aba_sensibilidade(df_model, models_data)
+        aba_projecao_pais(df_model, models_data)
 
     with tab4:
-        aba_analise_comparada(df_model, models_data)
+        aba_sensibilidade(df_model, models_data)
 
     with tab5:
+        aba_analise_comparada(df_model, models_data)
+
+    with tab6:
+        aba_diagnosticos(df_model, models_data)
+
+    with tab7:
         aba_geracao_figuras(df_model, models_data)
 
 if __name__ == "__main__":
