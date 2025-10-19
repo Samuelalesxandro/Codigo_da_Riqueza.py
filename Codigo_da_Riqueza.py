@@ -360,7 +360,11 @@ def gerar_cenarios_realistas(df_model, pais, modelo, ano_final=2035):
 def main():
     st.set_page_config(page_title="Código da Riqueza", layout="wide")
     st.title("📊 O Código da Riqueza — Painel Interativo Melhorado")
-    
+    menu = st.sidebar.radio(
+    "📂 Seções do Painel",
+    ["Painel Principal", "Geração de Figuras do TCC e SHAP"]
+)
+
     # Inicializar dados na sessão se não existirem
     if 'df' not in st.session_state or 'df_model' not in st.session_state:
         with st.spinner("Carregando dados do Banco Mundial..."):
@@ -389,7 +393,15 @@ def main():
             st.session_state.models_data = models_data
     
     models_data = st.session_state.models_data
-    
+    # --- NAVEGAÇÃO ENTRE ABAS ---
+    if menu == "Painel Principal":
+    # Aqui continua todo o seu painel atual (já existente)
+    # Nenhuma modificação é necessária.
+    pass
+
+    elif menu == "Geração de Figuras do TCC e SHAP":
+    aba_geracao_figuras(df_model, models_data)
+
     # --- SEÇÃO DE COMPARAÇÃO DE MODELOS ---
     st.header("🤖 Comparação de Modelos de Machine Learning")
     
@@ -912,6 +924,67 @@ def main():
         - R² 0.6-0.8: Bom poder explicativo  
         - R² < 0.6: Poder explicativo limitado
         """)
+        # ================================================================
+# 📦 SEÇÃO EXTRA — INTEGRAÇÃO DAS FIGURAS DO TCC E SHAP NO STREAMLIT
+# ================================================================
+
+import os
+from codigo_figuras_tcc import (
+    gerar_figura1_importancia_variaveis,
+    gerar_figura2_comparacao_modelos,
+    gerar_figura3_validacao_temporal,
+    gerar_figura4_cenarios_china,
+    gerar_figura5_ranking_crescimento
+)
+from codigo_figuras_shap import (
+    gerar_figura6_shap_summary,
+    gerar_figura7_shap_dependence,
+    gerar_figura8_casos_extremos
+)
+
+def aba_geracao_figuras(df_model, models_data):
+    """
+    Aba Streamlit para gerar automaticamente as figuras do TCC e as análises SHAP.
+    """
+    st.header("🎨 Geração Automática de Figuras — TCC e SHAP")
+    st.markdown("""
+    Esta seção permite gerar automaticamente todas as figuras obrigatórias do TCC:
+    - **Figuras 1 a 5** → Análises e comparações de modelos  
+    - **Figuras 6 a 8** → Análises SHAP (interpretabilidade do modelo)
+    """)
+
+    modelo_xgboost = models_data['modelos'].get('XGBoost')
+    feature_names = models_data['predictors']
+    resultados_df = models_data['resultados']
+
+    pasta_tcc = "figuras_tcc"
+    pasta_shap = "figuras_shap"
+    os.makedirs(pasta_tcc, exist_ok=True)
+    os.makedirs(pasta_shap, exist_ok=True)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("📈 Gerar Figuras do TCC"):
+            with st.spinner("Gerando Figuras 1–5..."):
+                gerar_figura1_importancia_variaveis(modelo_xgboost, feature_names)
+                gerar_figura2_comparacao_modelos(resultados_df)
+                gerar_figura3_validacao_temporal(df_model, modelo_xgboost, feature_names)
+                gerar_figura4_cenarios_china(df_model, modelo_xgboost)
+                gerar_figura5_ranking_crescimento(df_model, modelo_xgboost)
+            st.success("✅ Figuras do TCC geradas com sucesso! Salvas em /figuras_tcc/")
+
+    with col2:
+        if st.button("🧠 Gerar Figuras SHAP"):
+            with st.spinner("Calculando SHAP values e gerando Figuras 6–8..."):
+                X = models_data['X']
+                explainer, shap_values = gerar_figura6_shap_summary(modelo_xgboost, X, feature_names)
+                gerar_figura7_shap_dependence(X, shap_values, feature_names)
+                gerar_figura8_casos_extremos(df_model, modelo_xgboost, feature_names)
+            st.success("✅ Figuras SHAP geradas com sucesso! Salvas em /figuras_shap/")
+
+    st.info("💾 As figuras são salvas automaticamente nas pastas `figuras_tcc` e `figuras_shap` no mesmo diretório do projeto.")
+
 
 # --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
@@ -956,3 +1029,4 @@ else:
     except Exception as e:
         print(f"❌ Erro na execução: {e}")
         print("Execute com: streamlit run codigo_riqueza_melhorado.py")
+
