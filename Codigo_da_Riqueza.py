@@ -53,7 +53,7 @@ ZONA_DO_EURO = ['DEU', 'FRA', 'ITA', 'ESP', 'PRT', 'GRC', 'IRL', 'NLD', 'AUT', '
 BRICS = ['BRA', 'RUS', 'IND', 'CHN', 'ZAF', 'EGY', 'ETH', 'IRN', 'SAU', 'ARE']      
 PAISES_SUL_AMERICA = ['BRA', 'ARG', 'CHL', 'COL', 'PER', 'ECU', 'VEN', 'BOL', 'PRY', 'URY']
 PAISES_SUDESTE_ASIATICO = ['IDN', 'THA', 'VNM', 'PHL', 'MYS', 'SGP', 'MMR', 'KHM', 'LAO', 'BRN']
-TODOS_PAISES = list(set(PAISES_SUL_AMERICA + PAISES_SUDESTE_ASIATICO + BRICS + ZONA_DO_EURO))
+TODOS_PAISES = list(set(PAISES_SUL_AMERICA + PAISESTE_ASIATICO + BRICS + ZONA_DO_EURO))
 DATA_INICIO = datetime(1995, 1, 1)
 DATA_FIM = datetime(2025, 4, 30)
 
@@ -100,30 +100,6 @@ def processar_dados(df_raw):
     df = df.sort_values(['País','Ano'])
     df = df.groupby('País', group_keys=False).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
     df = df.dropna()
-   def processar_dados(df_raw):
-    if df_raw is None:
-        return None, None
-    df = df_raw.copy().reset_index(drop=True)
-    if 'country' in df.columns:
-        df.rename(columns={'country': 'País'}, inplace=True)
-    if 'date' in df.columns:
-        df.rename(columns={'date': 'Ano'}, inplace=True)
-    if 'País' not in df.columns and hasattr(df_raw, 'index') and hasattr(df_raw.index, 'get_level_values'):
-        try:
-            df['País'] = df_raw.index.get_level_values('country')
-        except Exception:
-            pass
-    if 'Ano' not in df.columns and hasattr(df_raw, 'index') and hasattr(df_raw.index, 'get_level_values'):
-        try:
-            df['Ano'] = df_raw.index.get_level_values('date')
-        except Exception:
-            pass
-    if 'País' not in df.columns or 'Ano' not in df.columns:
-        st.error("Colunas 'País' ou 'Ano' ausentes.")
-        return None, None
-    df = df.sort_values(['País','Ano'])
-    df = df.groupby('País', group_keys=False).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
-    df = df.dropna()
 
     # --- Nova Parte: Limpeza e Conversão de Dados Numéricos ---
     # Obter colunas que NÃO são 'País' ou 'Ano'
@@ -140,18 +116,6 @@ def processar_dados(df_raw):
     df = df.dropna() # Remove novamente se houver NaNs persistentes após conversão
     # --- Fim da Nova Parte ---
 
-    df_model = df.copy().set_index(['País','Ano'])
-    for col in df_model.columns:
-        if col != 'PIB_per_capita':
-            df_model[f"{col}_lag1"] = df_model.groupby('País')[col].shift(1)
-    df_model = df_model.dropna()
-    return df, df_model.reset_index()
-    df_model = df.copy().set_index(['País','Ano'])
-    for col in df_model.columns:
-        if col != 'PIB_per_capita':
-            df_model[f"{col}_lag1"] = df_model.groupby('País')[col].shift(1)
-    df_model = df_model.dropna()
-    return df, df_model.reset_index()
     df_model = df.copy().set_index(['País','Ano'])
     for col in df_model.columns:
         if col != 'PIB_per_capita':
@@ -727,5 +691,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
