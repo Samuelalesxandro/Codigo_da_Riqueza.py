@@ -414,7 +414,7 @@ def aba_geracao_figuras(df_model, models_data):
                 out2 = fig_comparacao_modelos(resultados_df)
                 out3 = fig_validacao_temporal(df_model, modelo_xgboost, feature_names)
                 out4 = fig_cenarios_china(df_model, modelo_xgboost)
-                                out5 = fig_ranking_crescimento(df_model, modelo_xgboost)
+                out5 = fig_ranking_crescimento(df_model, modelo_xgboost)
                 st.success("✅ Figuras do TCC (1–5) geradas com sucesso!")
                 for i, out in enumerate([out1, out2, out3, out4, out5], 1):
                     if out:
@@ -540,4 +540,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
