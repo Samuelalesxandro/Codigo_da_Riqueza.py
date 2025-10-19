@@ -100,6 +100,51 @@ def processar_dados(df_raw):
     df = df.sort_values(['País','Ano'])
     df = df.groupby('País', group_keys=False).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
     df = df.dropna()
+    # -------------------- Data utils --------------------
+def processar_dados(df_raw):
+    if df_raw is None:
+        return None, None
+    df = df_raw.copy().reset_index(drop=True)
+    if 'country' in df.columns:
+        df.rename(columns={'country': 'País'}, inplace=True)
+    if 'date' in df.columns:
+        df.rename(columns={'date': 'Ano'}, inplace=True)
+    if 'País' not in df.columns and hasattr(df_raw, 'index') and hasattr(df_raw.index, 'get_level_values'):
+        try:
+            df['País'] = df_raw.index.get_level_values('country')
+        except Exception:
+            pass
+    if 'Ano' not in df.columns and hasattr(df_raw, 'index') and hasattr(df_raw.index, 'get_level_values'):
+        try:
+            df['Ano'] = df_raw.index.get_level_values('date')
+        except Exception:
+            pass
+    if 'País' not in df.columns or 'Ano' not in df.columns:
+        st.error("Colunas 'País' ou 'Ano' ausentes.")
+        return None, None
+    df = df.sort_values(['País','Ano'])
+    df = df.groupby('País', group_keys=False).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
+    df = df.dropna()
+
+    # --- Nova parte: Limpeza de dados numéricos ---
+    # Converter todas as colunas numéricas para float, tratando strings com notação científica
+    for col in df.columns:
+        if col not in ['País', 'Ano']:  # Ignorar colunas de texto
+            try:
+                # Tenta converter a coluna para float
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                # Se houver valores NaN após a conversão, pode ser necessário tratar separadamente
+                # Mas geralmente o .ffill().bfill() já resolve isso.
+            except Exception as e:
+                st.warning(f"Problema ao converter coluna '{col}': {e}")
+    # --- Fim da nova parte ---
+
+    df_model = df.copy().set_index(['País','Ano'])
+    for col in df_model.columns:
+        if col != 'PIB_per_capita':
+            df_model[f"{col}_lag1"] = df_model.groupby('País')[col].shift(1)
+    df_model = df_model.dropna()
+    return df, df_model.reset_index()
     df_model = df.copy().set_index(['País','Ano'])
     for col in df_model.columns:
         if col != 'PIB_per_capita':
@@ -675,3 +720,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
