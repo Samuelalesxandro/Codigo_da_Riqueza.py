@@ -1,3 +1,4 @@
+```python
 import os
 from datetime import datetime
 import warnings
@@ -332,26 +333,50 @@ def fig_cenarios_china(df_model, modelo, out_path="figuras_tcc/Figura4_Cenarios_
 def fig_ranking_crescimento(df_model, modelo, top_n=10, out_path="figuras_tcc/Figura5_Ranking_Crescimento.png"):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     cres = []
-    for pais in TODOS_PAISES:
+    # Use the countries available in the *input* df_model
+    # Filter for countries that exist in the dataset
+    available_countries = df_model['País'].unique()
+    countries_to_process = [pais for pais in TODOS_PAISES if pais in available_countries]
+    for pais in countries_to_process: # Iterate only over countries present in the data
         try:
             proj = gerar_projecao_realista_improved(df_model, pais, modelo, ano_final=2035, uncertainty=False)
             proj = proj.reset_index(drop=True)
-            df_hist = proj[proj['Ano']<=2024]; df_fut = proj[proj['Ano']>2024]
+            df_hist = proj[proj['Ano']<=2024]
+            df_fut = proj[proj['Ano']>2024]
             if len(df_hist)>0 and len(df_fut)>0:
-                pib_i = float(df_hist.iloc[-1]['PIB_per_capita']); pib_f = float(df_fut.iloc[-1]['PIB_per_capita'])
+                pib_i = float(df_hist.iloc[-1]['PIB_per_capita'])
+                pib_f = float(df_fut.iloc[-1]['PIB_per_capita'])
                 anos = len(df_fut)
                 taxa = (((pib_f/pib_i)**(1/anos))-1)*100
-                cres.append({'País':pais, 'Taxa Anual (%)':taxa})
+                # Ensure the column name matches the one used in sort_values
+                cres.append({'País': pais, 'Taxa Anual (%)': taxa})
         except Exception:
+            # If an error occurs for a specific country, just skip it and continue
             continue
+
+    # Check if the cres list is empty before creating the DataFrame
+    if not cres: # If cres is empty
+        print(f"Debug: No data generated for ranking in fig_ranking_crescimento. Available countries: {list(available_countries)}")
+        return None # Or return an empty plot if preferred
+
     df_rank = pd.DataFrame(cres).sort_values('Taxa Anual (%)', ascending=False).head(top_n)
-    if df_rank.empty: return None
-    fig, ax = plt.subplots(figsize=(12,8))
-    colors = plt.cm.RdYlGn(np.linspace(0.3,0.9,len(df_rank)))
+
+    # Check if df_rank is empty after sorting and slicing
+    if df_rank.empty:
+        print("Debug: df_rank is empty after sorting and slicing.")
+        return None # Or return an empty plot if preferred
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    colors = plt.cm.RdYlGn(np.linspace(0.3, 0.9, len(df_rank)))
     ax.barh(df_rank['País'], df_rank['Taxa Anual (%)'], color=colors)
-    for i,row in enumerate(df_rank.itertuples()):
+    for i, row in enumerate(df_rank.itertuples()):
+        # Use getattr or row._2; row._1 is the index
         ax.text(row._2 + 0.1, i, f"{row._2:.1f}%", va='center', fontsize=9)
-    ax.set_xlabel('Taxa anual (%)'); ax.set_title('Figura 5 - Ranking de crescimento projetado (2025-2035)'); plt.tight_layout(); fig.savefig(out_path, dpi=300); plt.close()
+    ax.set_xlabel('Taxa anual (%)')
+    ax.set_title('Figura 5 - Ranking de crescimento projetado (2025-2035)')
+    plt.tight_layout()
+    fig.savefig(out_path, dpi=300)
+    plt.close()
     return out_path
 
 def fig_shap_summary(modelo, X, feature_names, out_path="figuras_shap/Figura6_SHAP_Summary.png"):
@@ -540,5 +565,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
+```
