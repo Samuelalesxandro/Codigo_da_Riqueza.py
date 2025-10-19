@@ -394,12 +394,12 @@ def main():
     
     models_data = st.session_state.models_data
     # --- NAVEGAÇÃO ENTRE ABAS ---
-    if menu == "Painel Principal":
+if menu == "Painel Principal":
     # Aqui continua todo o seu painel atual (já existente)
     # Nenhuma modificação é necessária.
     pass
 
-    elif menu == "Geração de Figuras do TCC e SHAP":
+ elif menu == "Geração de Figuras do TCC e SHAP":
     aba_geracao_figuras(df_model, models_data)
 
     # --- SEÇÃO DE COMPARAÇÃO DE MODELOS ---
@@ -1029,4 +1029,5 @@ else:
     except Exception as e:
         print(f"❌ Erro na execução: {e}")
         print("Execute com: streamlit run codigo_riqueza_melhorado.py")
+
 
