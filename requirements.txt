@@ -10,3 +10,4 @@ streamlit
 shap
 plotly
 statsmodels
+statsmodels
