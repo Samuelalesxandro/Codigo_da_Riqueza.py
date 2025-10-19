@@ -100,8 +100,7 @@ def processar_dados(df_raw):
     df = df.sort_values(['País','Ano'])
     df = df.groupby('País', group_keys=False).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
     df = df.dropna()
-    # -------------------- Data utils --------------------
-def processar_dados(df_raw):
+   def processar_dados(df_raw):
     if df_raw is None:
         return None, None
     df = df_raw.copy().reset_index(drop=True)
@@ -126,19 +125,27 @@ def processar_dados(df_raw):
     df = df.groupby('País', group_keys=False).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
     df = df.dropna()
 
-    # --- Nova parte: Limpeza de dados numéricos ---
-    # Converter todas as colunas numéricas para float, tratando strings com notação científica
-    for col in df.columns:
-        if col not in ['País', 'Ano']:  # Ignorar colunas de texto
-            try:
-                # Tenta converter a coluna para float
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                # Se houver valores NaN após a conversão, pode ser necessário tratar separadamente
-                # Mas geralmente o .ffill().bfill() já resolve isso.
-            except Exception as e:
-                st.warning(f"Problema ao converter coluna '{col}': {e}")
-    # --- Fim da nova parte ---
+    # --- Nova Parte: Limpeza e Conversão de Dados Numéricos ---
+    # Obter colunas que NÃO são 'País' ou 'Ano'
+    colunas_numericas = df.select_dtypes(include=[np.number, 'object']).columns.tolist()
+    colunas_numericas = [col for col in colunas_numericas if col not in ['País', 'Ano']]
 
+    for col in colunas_numericas:
+        # Tenta converter a coluna para float, forçando erros a se tornarem NaN
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    # Preenche novamente possíveis NaNs introduzidos pela conversão, se necessário
+    # (Embora o ffill/bfill anterior já deva ter lidado com isso na maioria dos casos)
+    df = df.groupby('País', group_keys=False).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
+    df = df.dropna() # Remove novamente se houver NaNs persistentes após conversão
+    # --- Fim da Nova Parte ---
+
+    df_model = df.copy().set_index(['País','Ano'])
+    for col in df_model.columns:
+        if col != 'PIB_per_capita':
+            df_model[f"{col}_lag1"] = df_model.groupby('País')[col].shift(1)
+    df_model = df_model.dropna()
+    return df, df_model.reset_index()
     df_model = df.copy().set_index(['País','Ano'])
     for col in df_model.columns:
         if col != 'PIB_per_capita':
@@ -720,4 +727,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
